@@ -5,8 +5,8 @@
 Il dispositivo si chiama semplicemente **T7** nel contesto operativo. Fedora lo verifica come
 `Samsung PSSD T7 Shield`, seriale `S6YGNS0Y903440H`, UUID
 `4c75ac03-4c73-43f8-afd9-f90db49a74fc`, ext4 label `T7_BACKUP`, montato in
-`/mnt/T7_BACKUP`. Una vecchia chiavetta recovery può avere label vfat
-`VEEAMRE`: non è il T7 e non deve mai essere usata come destinazione.
+`/mnt/T7_BACKUP`. Un supporto recovery storico distinto non è il T7 e non deve
+mai essere usato come destinazione.
 
 Il repository `/mnt/T7_BACKUP/restic-fedora` è cifrato da Restic. La password è
 custodita in `/etc/credstore.encrypted/t7-restic-password` (`root:root 0600`) e
