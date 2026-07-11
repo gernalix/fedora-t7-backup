@@ -1,0 +1,15 @@
+{
+  "project_name": "Fedora T7 Backup",
+  "project_slug": "fedora-t7-backup",
+  "project_root": "/home/daniele/MegaVault/projects/fedora-t7-backup",
+  "git_remote": "https://github.com/gernalix/fedora-t7-backup.git",
+  "global_protocol": "/home/daniele/MegaVault/ai/MEGAVAULT_PROTOCOL.md",
+  "host_profile": "/home/daniele/MegaVault/ai/global/HOST_PROFILE.md",
+  "ai_doc": "docs/ai/PROJECT.md",
+  "human_doc": "docs/human/overview.md",
+  "metadata_version": 1,
+  "project_version": "1.0.0",
+  "activity_id": "583921",
+  "branch": "codex/583921-fedora-t7-backup",
+  "last_indexed_at": "2026-07-12T01:20:00+02:00"
+}

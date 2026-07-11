@@ -1,0 +1,6 @@
+*.log
+*.tmp
+*.restore
+coverage/
+reports/private/
+secrets/

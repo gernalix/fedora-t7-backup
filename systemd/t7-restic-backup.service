@@ -1,0 +1,34 @@
+[Unit]
+Description=Activity 583921 encrypted Restic backup to T7
+Documentation=file:/usr/share/doc/fedora-t7-backup/OPERATIONS.md
+RequiresMountsFor=/mnt/T7_BACKUP
+After=local-fs.target mnt-T7_BACKUP.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/t7-restic-backup backup
+LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password
+StateDirectory=t7-restic-backup
+CacheDirectory=t7-restic-backup
+RuntimeDirectory=t7-restic-backup
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUWeight=20
+IOWeight=20
+TimeoutStartSec=12h
+TimeoutStopSec=15min
+KillSignal=SIGINT
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/mnt/T7_BACKUP /var/lib/t7-restic-backup /var/cache/t7-restic-backup /run/lock /var/lib/fedora-system-monitor
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes

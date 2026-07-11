@@ -1,0 +1,27 @@
+# Activity 583921 - rebuildable caches and unsafe/live data.
+/home/*/.cache
+/home/*/.local/share/Trash
+/home/*/.gradle/caches
+/home/*/.m2/repository
+/home/*/Android/Sdk
+/home/*/.android/cache
+/home/*/.var/app/*/cache
+/root/.cache
+/var/cache
+/var/tmp
+/var/lib/systemd/coredump
+/var/lib/flatpak/repo
+/var/lib/flatpak/appstream
+/var/lib/containers/storage/overlay
+/var/lib/containers/storage/overlay-images
+/var/lib/containers/storage/overlay-layers
+/var/lib/fedora-system-monitor/monitor.sqlite3
+/var/lib/fedora-system-monitor/monitor.sqlite3-wal
+/var/lib/fedora-system-monitor/monitor.sqlite3-shm
+/mnt/T7_BACKUP
+/proc
+/sys
+/dev
+/run
+/tmp
+/swapfile

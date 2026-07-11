@@ -1,0 +1,12 @@
+REGISTRY.version=1
+INCIDENT.id=t7-mountpoint-fell-through-to-root
+INCIDENT.status=RESOLVED
+INCIDENT.severity=critical
+INCIDENT.first_seen=2026-07-12T01:09:00+02:00
+INCIDENT.scope=host-backup-storage
+INCIDENT.symptom=/mnt/T7_BACKUP existed while the ext4 T7 was not mounted and resolved to the internal Btrfs root
+INCIDENT.impact=An unguarded backup could have filled internal storage instead of protecting data
+INCIDENT.root_cause=T7 fstab entry uses nofail and the device was unavailable during boot; a directory alone cannot prove a mount
+INCIDENT.resolution=Runtime requires mountpoint,UUID,label,persistent by-id serial/model,parent-disk match,and different device number before repository access
+INCIDENT.test=Missing-or-invalid mount simulation must exit nonzero without creating repository content under the internal mount directory
+INCIDENT.activity=583921

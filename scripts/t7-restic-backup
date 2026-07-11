@@ -1,0 +1,249 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+umask 077
+
+readonly ACTIVITY_ID=583921
+readonly DEVICE_NAME=T7
+readonly MOUNT_POINT=/mnt/T7_BACKUP
+readonly T7_UUID=4c75ac03-4c73-43f8-afd9-f90db49a74fc
+readonly T7_LABEL=T7_BACKUP
+readonly T7_SERIAL=S6YGNS0Y903440H
+readonly T7_MODEL='Samsung PSSD T7 Shield'
+readonly T7_DISK_BY_ID=/dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0
+readonly T7_PART_BY_ID=/dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0-part1
+readonly REPOSITORY=/mnt/T7_BACKUP/restic-fedora
+readonly EXCLUDES=/etc/t7-restic-backup/excludes.txt
+readonly STATE_DIR=/var/lib/t7-restic-backup
+readonly CACHE_DIR=/var/cache/t7-restic-backup
+readonly LOCK_FILE=/run/lock/t7-restic-backup.lock
+
+log() {
+    local level=$1
+    shift
+    printf 'activity=%s device=%s level=%s %s\n' "$ACTIVITY_ID" "$DEVICE_NAME" "$level" "$*"
+}
+
+die() {
+    local code=$1
+    shift
+    log ERROR "$*"
+    exit "$code"
+}
+
+on_error() {
+    local code=$?
+    log ERROR "action=${ACTION:-unknown} line=${BASH_LINENO[0]:-unknown} exit=$code"
+    exit "$code"
+}
+trap on_error ERR
+
+require_root() {
+    [[ $EUID -eq 0 ]] || die 77 'root privileges required'
+}
+
+validate_t7() {
+    local source source_real expected_part expected_disk parent parent_path
+    local uuid label fstype disk_props
+
+    [[ -e $T7_DISK_BY_ID && -e $T7_PART_BY_ID ]] ||
+        die 20 "T7 absent: persistent by-id for serial $T7_SERIAL is missing"
+    mountpoint -q "$MOUNT_POINT" ||
+        die 21 "unsafe destination: $MOUNT_POINT is not a mount point"
+
+    source=$(findmnt -rn -o SOURCE --mountpoint "$MOUNT_POINT")
+    uuid=$(findmnt -rn -o UUID --mountpoint "$MOUNT_POINT")
+    label=$(findmnt -rn -o LABEL --mountpoint "$MOUNT_POINT")
+    fstype=$(findmnt -rn -o FSTYPE --mountpoint "$MOUNT_POINT")
+    [[ $uuid == "$T7_UUID" ]] || die 22 "wrong UUID at $MOUNT_POINT: ${uuid:-none}"
+    [[ $label == "$T7_LABEL" ]] || die 23 "wrong filesystem label at $MOUNT_POINT: ${label:-none}"
+    [[ $fstype == ext4 ]] || die 24 "wrong filesystem type at $MOUNT_POINT: ${fstype:-none}"
+
+    source_real=$(readlink -e -- "$source")
+    expected_part=$(readlink -e -- "$T7_PART_BY_ID")
+    expected_disk=$(readlink -e -- "$T7_DISK_BY_ID")
+    [[ $source_real == "$expected_part" ]] ||
+        die 25 'mounted source does not match the persistent T7 partition identity'
+    parent=$(lsblk -ndo PKNAME -- "$source_real")
+    [[ -n $parent ]] || die 26 'cannot resolve T7 parent disk'
+    parent_path=$(readlink -e -- "/dev/$parent")
+    [[ $parent_path == "$expected_disk" ]] ||
+        die 27 'mounted partition parent does not match the persistent T7 disk identity'
+
+    disk_props=$(udevadm info --query=property --name "$T7_DISK_BY_ID")
+    grep -Fxq "ID_SERIAL_SHORT=$T7_SERIAL" <<<"$disk_props" ||
+        die 28 'T7 serial validation failed'
+    grep -Eq '^ID_MODEL=(PSSD_T7_Shield|Samsung_PSSD_T7_Shield)$' <<<"$disk_props" ||
+        die 29 'T7 model validation failed'
+    [[ $(stat -c %d -- "$MOUNT_POINT") != $(stat -c %d -- /) ]] ||
+        die 30 'unsafe destination: T7 mount resolves to the internal root filesystem'
+    [[ $REPOSITORY == "$MOUNT_POINT"/* ]] || die 31 'repository path escaped the T7 mount'
+
+    log INFO "identity_ok model=$T7_MODEL serial=$T7_SERIAL uuid=$T7_UUID mount=$MOUNT_POINT"
+}
+
+load_credential() {
+    local credential_dir=${CREDENTIALS_DIRECTORY:-}
+    [[ -n $credential_dir && -r $credential_dir/restic-password ]] ||
+        die 40 'systemd credential restic-password is unavailable'
+    export RESTIC_PASSWORD_FILE="$credential_dir/restic-password"
+    export RESTIC_REPOSITORY="$REPOSITORY"
+    export RESTIC_CACHE_DIR="$CACHE_DIR"
+    export RESTIC_HOST=fedora
+}
+
+lock_exclusive() {
+    install -d -m 0755 "$(dirname "$LOCK_FILE")"
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || die 50 'another T7 Restic operation is active'
+}
+
+require_repository() {
+    [[ -f $REPOSITORY/config && -d $REPOSITORY/data && -d $REPOSITORY/keys ]] ||
+        die 60 "Restic repository is missing or incomplete at $REPOSITORY"
+}
+
+capture_manifest() {
+    local next=$STATE_DIR/manifest.next
+    local current=$STATE_DIR/manifest
+    local previous=$STATE_DIR/manifest.previous
+    local db=/var/lib/fedora-system-monitor/monitor.sqlite3
+
+    rm -rf -- "$next"
+    install -d -m 0700 "$next" "$next/databases"
+    date --iso-8601=seconds >"$next/generated-at.txt"
+    hostnamectl >"$next/hostnamectl.txt"
+    uname -a >"$next/uname.txt"
+    cat /etc/os-release >"$next/os-release.txt"
+    dnf repoquery --userinstalled >"$next/rpm-userinstalled.txt" 2>"$next/dnf-warnings.txt"
+    rpm -qa --qf '%{name}-%{evr}.%{arch}\n' | sort >"$next/rpm-all.txt"
+    flatpak list --system --app --columns=application,branch,arch,version,origin >"$next/flatpak-system.txt" 2>&1 || true
+    runuser -u daniele -- flatpak list --user --app --columns=application,branch,arch,version,origin >"$next/flatpak-user.txt" 2>&1 || true
+    lsblk --json -b -O >"$next/lsblk.json"
+    findmnt --json -A -o TARGET,SOURCE,FSTYPE,OPTIONS,UUID,LABEL,PARTUUID,FSROOT >"$next/findmnt.json"
+    blkid >"$next/blkid.txt"
+    systemctl list-unit-files --state=enabled --no-pager >"$next/systemd-enabled.txt"
+    systemctl list-timers --all --no-pager >"$next/systemd-timers.txt"
+    bootctl status >"$next/bootctl.txt" 2>&1 || true
+    cat /proc/cmdline >"$next/kernel-cmdline.txt"
+    getenforce >"$next/selinux.txt"
+    sestatus >>"$next/selinux.txt" 2>&1 || true
+    podman ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}' >"$next/podman-root-containers.txt" 2>&1 || true
+    podman volume ls >"$next/podman-root-volumes.txt" 2>&1 || true
+    runuser -u daniele -- podman ps -a --format '{{.ID}} {{.Names}} {{.Image}} {{.Status}}' >"$next/podman-user-containers.txt" 2>&1 || true
+    runuser -u daniele -- podman volume ls >"$next/podman-user-volumes.txt" 2>&1 || true
+    find /home/daniele/MegaVault /home/daniele/projects -xdev -maxdepth 6 -type d -name .git -printf '%h\n' 2>/dev/null | sort -u >"$next/git-repositories.txt"
+
+    if [[ -f $db ]]; then
+        local sqlite_ok=false
+        local attempt
+        for attempt in 1 2 3 4 5; do
+            rm -f -- "$next/databases/fedora-system-monitor.sqlite3"
+            if timeout 90 sqlite3 -readonly -cmd '.timeout 60000' "$db" \
+                ".backup '$next/databases/fedora-system-monitor.sqlite3'"; then
+                sqlite_ok=true
+                break
+            fi
+            log WARNING "sqlite_backup_busy attempt=$attempt max=5"
+            sleep 5
+        done
+        [[ $sqlite_ok == true ]] || die 70 'consistent Fedora System Monitor SQLite backup remained locked'
+        sqlite3 -readonly "$next/databases/fedora-system-monitor.sqlite3" 'PRAGMA integrity_check; PRAGMA foreign_key_check;' \
+            >"$next/databases/fedora-system-monitor-integrity.txt"
+        grep -Fxq ok "$next/databases/fedora-system-monitor-integrity.txt" ||
+            die 70 'consistent Fedora System Monitor SQLite backup failed integrity check'
+    fi
+
+    rm -rf -- "$previous"
+    [[ ! -d $current ]] || mv -- "$current" "$previous"
+    mv -- "$next" "$current"
+    log INFO "manifest_ready path=$current"
+}
+
+run_backup() {
+    local -a paths=()
+    local path
+    for path in /home /root /etc /usr/local /opt /var/lib /var/spool /var/www /srv /boot; do
+        [[ -e $path ]] && paths+=("$path")
+    done
+    capture_manifest
+    restic unlock
+    log INFO "backup_start repository=$REPOSITORY"
+    restic backup --one-file-system --exclude-file "$EXCLUDES" \
+        --tag "activity-$ACTIVITY_ID" --tag fedora-system "${paths[@]}"
+    restic forget --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
+        --group-by host,paths
+    log INFO 'backup_success retention_applied=yes'
+}
+
+run_restore() {
+    local snapshot=${1:-latest}
+    local target=${2:-}
+    local include=${3:-}
+    [[ $target == /* && $target != / && $target != "$MOUNT_POINT"* ]] ||
+        die 80 'restore target must be a safe absolute path outside the T7'
+    [[ -n $include && $include == /* ]] || die 81 'restore include must be an absolute backed-up path'
+    [[ ! -e $target ]] || die 82 'restore target already exists'
+    restic restore "$snapshot" --target "$target" --include "$include"
+    log INFO "restore_success snapshot=$snapshot target=$target include=$include"
+}
+
+require_root
+ACTION=${1:-}
+[[ -n $ACTION ]] || die 64 'usage: t7-restic-backup ACTION'
+validate_t7
+load_credential
+install -d -m 0700 "$STATE_DIR" "$CACHE_DIR"
+lock_exclusive
+
+case "$ACTION" in
+    init)
+        if [[ -e $REPOSITORY ]]; then
+            require_repository
+            restic cat config >/dev/null
+            log INFO 'repository_exists_and_opens=yes'
+        else
+            restic init
+            chmod 0700 "$REPOSITORY"
+            log INFO "repository_initialized=$REPOSITORY encrypted=yes"
+        fi
+        ;;
+    backup)
+        require_repository
+        run_backup
+        ;;
+    check-light)
+        require_repository
+        restic unlock
+        restic check --read-data-subset=5%
+        log INFO 'check_light_success=yes subset=5%'
+        ;;
+    check-full)
+        require_repository
+        restic unlock
+        restic check --read-data
+        log INFO 'check_full_success=yes read_data=all'
+        ;;
+    prune)
+        require_repository
+        restic unlock
+        restic forget --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
+            --group-by host,paths --prune
+        log INFO 'retention_prune_success=yes'
+        ;;
+    snapshots)
+        require_repository
+        restic snapshots --group-by host,paths
+        ;;
+    stats)
+        require_repository
+        restic stats --mode raw-data
+        ;;
+    restore)
+        require_repository
+        shift
+        run_restore "$@"
+        ;;
+    *)
+        die 64 "unknown action: $ACTION"
+        ;;
+esac
