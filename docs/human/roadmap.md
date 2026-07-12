@@ -4,3 +4,4 @@
 - Rivalutare retention solo con misure reali di capacità.
 - Aggiungere notifica fallimenti solo tramite interfaccia segreta root-safe.
 - Considerare una seconda copia off-site indipendente.
+- Verificare periodicamente notifiche Telegram e testare un vero replug a PC idle.

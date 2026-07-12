@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-readonly ACTIVITY_ID=583921
+readonly ACTIVITY_ID=684219
 readonly DEVICE_NAME=T7
 readonly MOUNT_POINT=/mnt/T7_BACKUP
 readonly T7_UUID=4c75ac03-4c73-43f8-afd9-f90db49a74fc
@@ -32,6 +32,7 @@ die() {
 
 on_error() {
     local code=$?
+    [[ -z ${BACKUP_JSON_TMP:-} ]] || rm -f -- "$BACKUP_JSON_TMP"
     log ERROR "action=${ACTION:-unknown} line=${BASH_LINENO[0]:-unknown} exit=$code"
     exit "$code"
 }
@@ -54,6 +55,9 @@ validate_t7() {
     uuid=$(findmnt -rn -o UUID --mountpoint "$MOUNT_POINT")
     label=$(findmnt -rn -o LABEL --mountpoint "$MOUNT_POINT")
     fstype=$(findmnt -rn -o FSTYPE --mountpoint "$MOUNT_POINT")
+    [[ -n $uuid ]] || uuid=$(blkid -s UUID -o value -- "$source")
+    [[ -n $label ]] || label=$(blkid -s LABEL -o value -- "$source")
+    [[ -n $fstype ]] || fstype=$(blkid -s TYPE -o value -- "$source")
     [[ $uuid == "$T7_UUID" ]] || die 22 "wrong UUID at $MOUNT_POINT: ${uuid:-none}"
     [[ $label == "$T7_LABEL" ]] || die 23 "wrong filesystem label at $MOUNT_POINT: ${label:-none}"
     [[ $fstype == ext4 ]] || die 24 "wrong filesystem type at $MOUNT_POINT: ${fstype:-none}"
@@ -168,9 +172,13 @@ run_backup() {
     capture_manifest
     restic unlock
     log INFO "backup_start repository=$REPOSITORY"
-    restic backup --one-file-system --exclude-file "$EXCLUDES" \
-        --tag "activity-$ACTIVITY_ID" --tag fedora-system "${paths[@]}"
-    restic forget --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
+    BACKUP_JSON_TMP=$(mktemp /run/t7-restic-backup-result.XXXXXX.json)
+    restic backup --json --one-file-system --exclude-file "$EXCLUDES" \
+        --tag "activity-$ACTIVITY_ID" --tag fedora-system "${paths[@]}" >"$BACKUP_JSON_TMP"
+    /usr/local/libexec/t7-restic-metrics "$BACKUP_JSON_TMP" "$STATE_DIR/last-backup.json"
+    rm -f -- "$BACKUP_JSON_TMP"
+    BACKUP_JSON_TMP=
+    restic forget --quiet --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
         --group-by host,paths
     log INFO 'backup_success retention_applied=yes'
 }

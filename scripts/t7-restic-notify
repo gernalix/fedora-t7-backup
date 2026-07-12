@@ -1,0 +1,72 @@
+#!/usr/bin/python3
+import argparse
+import datetime as dt
+import json
+import os
+from pathlib import Path
+
+from telegram_notify import send_message
+
+ACTIVITY_ID = "684219"
+STATE = Path("/var/lib/t7-restic-backup/notifications")
+
+parser = argparse.ArgumentParser()
+parser.add_argument("kind", choices=("success", "error", "reminder"))
+parser.add_argument("job_id")
+parser.add_argument("--result-file")
+parser.add_argument("--phase", default="unknown")
+parser.add_argument("--exit-code", type=int, default=1)
+parser.add_argument("--mounted", choices=("yes", "no"), default="no")
+parser.add_argument("--safe-disconnect", choices=("yes", "no"), default="no")
+parser.add_argument("--test", action="store_true")
+args = parser.parse_args()
+if not args.job_id.replace("-", "").isalnum():
+    raise SystemExit(64)
+
+STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+marker = STATE / f"{args.job_id}-{args.kind}.sent"
+if marker.exists():
+    print(f"activity={ACTIVITY_ID} notification={args.kind} duplicate=ignored")
+    raise SystemExit(0)
+
+if args.kind == "success":
+    if not args.result_file:
+        raise SystemExit(64)
+    data = json.loads(Path(args.result_file).read_text(encoding="utf-8"))
+    duration = max(0, round(float(data["duration_seconds"])))
+    added = int(data["data_added_packed"])
+    snapshot = str(data["snapshot_id"])[:8]
+    title = "TEST - Backup T7 completato" if args.test else "Backup T7 completato"
+    message = (
+        ("TEST CONTROLLATO.\n" if args.test else "")
+        + "Backup T7 completato con successo.\n"
+        f"Durata: {duration} s\nSnapshot: {snapshot}\nDati scritti nel repository: {added} byte\n"
+        "Il Samsung T7 è stato smontato in sicurezza e può essere scollegato."
+    )
+elif args.kind == "error":
+    title = "TEST - Backup T7 fallito" if args.test else "Backup T7 fallito"
+    disconnect = "sì" if args.safe_disconnect == "yes" else "no"
+    message = (
+        ("TEST CONTROLLATO.\n" if args.test else "")
+        + "Backup T7 fallito.\n"
+        f"Fase: {args.phase}\nExit code: {args.exit_code}\n"
+        f"T7 montato: {args.mounted}\nPuò essere scollegato: {disconnect}\n"
+        "Log: sudo journalctl -u t7-restic-backup.service -n 200"
+    )
+else:
+    title = "TEST - Promemoria T7" if args.test else "Promemoria T7"
+    message = (
+        ("TEST CONTROLLATO.\n" if args.test else "")
+        + "Il Samsung T7 è ancora collegato.\n"
+        "Il backup è già terminato e il disco è smontato: puoi scollegarlo fisicamente."
+    )
+
+timestamp = dt.datetime.now(dt.timezone.utc).isoformat()
+with (STATE / "events.log").open("a", encoding="utf-8") as handle:
+    handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} pending\n")
+send_message(title, message)
+marker.write_text(timestamp + "\n", encoding="utf-8")
+os.chmod(marker, 0o600)
+with (STATE / "events.log").open("a", encoding="utf-8") as handle:
+    handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} sent\n")
+print(f"activity={ACTIVITY_ID} notification={args.kind} sent=yes job={args.job_id}")

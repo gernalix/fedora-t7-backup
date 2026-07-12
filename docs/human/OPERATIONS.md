@@ -1,4 +1,4 @@
-# Operazioni Fedora T7 Backup — attività 583921
+# Operazioni Fedora T7 Backup — attività 684219
 
 ## Identità e architettura
 
@@ -14,19 +14,31 @@ decrittata da systemd solo in RAM per la durata del servizio. Il job rifiuta
 mount assente, UUID/label/seriale/modello errati o mount ricaduto sul disco
 interno.
 
-## Stato, log e backup manuale
+## Collegamento automatico, stato e backup manuale
+
+Tenere normalmente il T7 scollegato. Il collegamento USB del seriale corretto
+attiva udev, che delega a `t7-restic-backup.service`. Il servizio attende la
+partizione, monta, verifica identità/repository/spazio, esegue backup+retention,
+le manutenzioni dovute, `sync`, smonta e invia Telegram. Scollegare solo dopo la
+notifica di successo. Se fallisce, leggere la notifica: `Può essere scollegato:
+no` significa che il mount non è stato chiuso.
 
 ```bash
-systemctl list-timers 't7-restic-*'
-systemctl status t7-restic-backup.timer t7-restic-check.timer t7-restic-maintenance.timer
+systemctl status t7-restic-backup.service t7-restic-reminder.timer
 sudo systemctl start t7-restic-backup.service
-sudo journalctl -u t7-restic-backup.service -u t7-restic-check.service -u t7-restic-maintenance.service
+sudo journalctl -u t7-restic-backup.service -n 200
+findmnt /mnt/T7_BACKUP
+lsblk -o NAME,TYPE,FSTYPE,UUID,MOUNTPOINTS
 ```
 
-Frequenze: backup giornaliero alle 03:00, check casuale del 5% domenica alle
-06:00, check completo e prune il primo giorno del mese alle 07:00; ogni timer ha
-jitter ed è `Persistent=true`. Retention: 7 giornalieri, 5 settimanali, 12
-mensili, 3 annuali, raggruppati per host e path.
+Ogni collegamento crea un backup. `forget` applica 7 giornalieri, 5 settimanali,
+12 mensili e 3 annuali. State esplicito `0600` limita check 5% e prune a una
+volta/settimana e check completo a una volta/mese. Dopo successo, il reminder
+one-shot a 30 minuti notifica solo se il seriale è ancora sul bus.
+
+Disabilitare temporaneamente il trigger: rinominare con prudenza la regola
+`/etc/udev/rules.d/90-t7-name.rules`, poi `sudo udevadm control --reload-rules`;
+ripristinarla e ricaricare per riattivare. Non modificare UUID/seriale.
 
 ## Elencare snapshot e statistiche
 

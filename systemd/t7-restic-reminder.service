@@ -1,0 +1,22 @@
+[Unit]
+Description=Activity 684219 one-time T7 disconnect reminder
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/t7-restic-reminder
+Environment=TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/telegram-notify/telegram-notify.env
+StateDirectory=t7-restic-backup
+UMask=0077
+TimeoutStartSec=2m
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/t7-restic-backup
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+

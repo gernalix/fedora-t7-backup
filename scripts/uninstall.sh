@@ -1,15 +1,18 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
 
-readonly ACTIVITY_ID=583921
+readonly ACTIVITY_ID=684219
 if [[ $EUID -ne 0 ]]; then exec sudo "$0" "$@"; fi
 
 systemctl disable --now t7-restic-backup.timer t7-restic-check.timer t7-restic-maintenance.timer 2>/dev/null || true
-systemctl stop t7-restic-backup.service t7-restic-check.service t7-restic-maintenance.service 2>/dev/null || true
+systemctl stop t7-restic-backup.service t7-restic-reminder.timer t7-restic-reminder.service 2>/dev/null || true
 rm -f /etc/systemd/system/t7-restic-backup.service /etc/systemd/system/t7-restic-backup.timer \
     /etc/systemd/system/t7-restic-check.service /etc/systemd/system/t7-restic-check.timer \
     /etc/systemd/system/t7-restic-maintenance.service /etc/systemd/system/t7-restic-maintenance.timer \
-    /usr/local/libexec/t7-restic-backup /etc/udev/rules.d/90-t7-name.rules \
+    /etc/systemd/system/t7-restic-reminder.service /etc/systemd/system/t7-restic-reminder.timer \
+    /usr/local/libexec/t7-restic-backup /usr/local/libexec/t7-restic-lifecycle \
+    /usr/local/libexec/t7-restic-metrics /usr/local/libexec/t7-restic-notify \
+    /usr/local/libexec/t7-restic-reminder /etc/udev/rules.d/90-t7-name.rules \
     /etc/udev/rules.d/90-t7-veeamre.rules
 systemctl daemon-reload
 udevadm control --reload-rules

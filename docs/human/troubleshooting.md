@@ -1,10 +1,14 @@
 # Troubleshooting
 
-- `exit 20`: T7 fisico assente o seriale persistente mancante.
-- `exit 21`: `/mnt/T7_BACKUP` non è un mount; non creare file lì.
-- `exit 22..30`: identità, filesystem o mount non sicuri; verificare `findmnt`,
-  `lsblk` e `/dev/disk/by-id` senza usare `/dev/sdX` come configurazione.
-- `exit 40`: credenziale systemd non caricata; usare service o `systemd-run`.
-- `exit 50`: altro job attivo; non rimuovere lock mentre un processo lavora.
-- `exit 60`: repository assente/incompleto; non reinizializzare sopra dati.
+- `exit 20`: T7 fisico o partizione persistente assenti dopo l'attesa.
+- `exit 21..24`: seriale, modello, filesystem o UUID non coincidono; non
+  forzare il job e non usare `/dev/sdX` come configurazione.
+- `exit 30..33`: mount, repository o spazio non sicuri. Verificare `findmnt`,
+  `lsblk` e `/dev/disk/by-id`; non creare file in `/mnt/T7_BACKUP` smontato.
+- `exit 40`: stato delle manutenzioni invalido; non correggerlo durante un job.
+- `exit 50..51`: lo smontaggio non è riuscito; non scollegare. Controllare
+  `fuser -vm /mnt/T7_BACKUP` e i log senza terminare processi estranei.
+- `exit 97`: fault injection controllata; non è un codice operativo normale.
+- `duplicate_event=ignored`: un secondo evento udev ha trovato il lock `/run`;
+  il job già attivo continua e non va interrotto.
 - Log: `sudo journalctl -u t7-restic-backup.service -n 200`.

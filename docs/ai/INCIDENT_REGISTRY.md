@@ -10,3 +10,12 @@ INCIDENT.root_cause=T7 fstab entry uses nofail and the device was unavailable du
 INCIDENT.resolution=Runtime requires mountpoint,UUID,label,persistent by-id serial/model,parent-disk match,and different device number before repository access
 INCIDENT.test=Missing-or-invalid mount simulation must exit nonzero without creating repository content under the internal mount directory
 INCIDENT.activity=583921
+
+INCIDENT.id=t7-lifecycle-mount-namespace
+INCIDENT.status=RESOLVED
+INCIDENT.severity=high
+INCIDENT.first_seen=2026-07-12T01:51:57+02:00
+INCIDENT.scope=activity-684219-trigger-lifecycle
+INCIDENT.root_cause=Filesystem hardening namespace hid mounts created after service start; RequiresMountsFor then stopped the requiring service during final unmount
+INCIDENT.resolution=Lifecycle uses global systemd mount unit without filesystem namespace options while retaining locks,timeouts,NoNewPrivileges,capability bounds,and process restrictions
+INCIDENT.verification=real udev replay created snapshot f7682be7 then synced,unmounted,notified,and exited success

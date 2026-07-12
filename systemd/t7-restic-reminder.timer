@@ -1,0 +1,7 @@
+[Unit]
+Description=Activity 684219 remind once if T7 remains connected
+
+[Timer]
+OnActiveSec=30min
+AccuracySec=30s
+Unit=t7-restic-reminder.service

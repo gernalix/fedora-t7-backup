@@ -1,12 +1,11 @@
 [Unit]
-Description=Activity 583921 encrypted Restic backup to T7
+Description=Activity 684219 automatic backup when T7 is connected
 Documentation=file:/usr/share/doc/fedora-t7-backup/OPERATIONS.md
-RequiresMountsFor=/mnt/T7_BACKUP
-After=local-fs.target mnt-T7_BACKUP.mount
+After=systemd-udevd.service local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/t7-restic-backup backup
+ExecStart=/usr/local/libexec/t7-restic-lifecycle
 LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password
 StateDirectory=t7-restic-backup
 CacheDirectory=t7-restic-backup
@@ -20,14 +19,10 @@ IOWeight=20
 TimeoutStartSec=12h
 TimeoutStopSec=15min
 KillSignal=SIGINT
+Restart=no
 NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/mnt/T7_BACKUP /var/lib/t7-restic-backup /var/cache/t7-restic-backup /run/lock /var/lib/fedora-system-monitor
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+SystemCallArchitectures=native
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes

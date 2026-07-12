@@ -1,0 +1,161 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+umask 077
+
+readonly ACTIVITY_ID=684219
+readonly DISK=/dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0
+readonly PART=/dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0-part1
+readonly UUID=4c75ac03-4c73-43f8-afd9-f90db49a74fc
+readonly MOUNT=/mnt/T7_BACKUP
+readonly REPO=$MOUNT/restic-fedora
+readonly STATE=/var/lib/t7-restic-backup
+readonly LOCK=/run/t7-restic-connect.lock
+readonly MIN_FREE_BYTES=$((10 * 1024 * 1024 * 1024))
+PHASE=start
+JOB_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+NOTIFIED=no
+
+log() { printf 'activity=%s job=%s phase=%s %s\n' "$ACTIVITY_ID" "$JOB_ID" "$PHASE" "$*"; }
+is_mounted() { mountpoint -q "$MOUNT"; }
+device_present() { [[ -e $DISK ]]; }
+
+notify_error() {
+    [[ $NOTIFIED == no ]] || return 0
+    local code=$1 mounted=no safe=no
+    local -a test_arg=()
+    is_mounted && mounted=yes
+    [[ $mounted == no ]] && safe=yes
+    [[ ${T7_TEST_MODE:-0} == 1 || -n ${T7_TEST_FAIL_PHASE:-} ]] && test_arg=(--test)
+    TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/telegram-notify/telegram-notify.env \
+        /usr/local/libexec/t7-restic-notify error "$JOB_ID" --phase "$PHASE" \
+        --exit-code "$code" --mounted "$mounted" --safe-disconnect "$safe" "${test_arg[@]}" || true
+    NOTIFIED=yes
+}
+
+cleanup_mount() {
+    PHASE=cleanup
+    if is_mounted; then
+        timeout 120 sync -f "$MOUNT" || log 'sync_cleanup=failed'
+        if ! timeout 60 systemctl stop mnt-T7_BACKUP.mount; then
+            log 'unmount=failed holders_follow=yes'
+            fuser -vm "$MOUNT" 2>&1 || true
+            lsof +f -- "$MOUNT" 2>&1 | head -n 80 || true
+            return 1
+        fi
+    fi
+    ! is_mounted
+}
+
+on_exit() {
+    local code=$?
+    local failed_phase=$PHASE
+    if [[ $code -ne 0 ]]; then
+        if cleanup_mount; then
+            PHASE=$failed_phase
+        else
+            PHASE=unmount-cleanup
+        fi
+        notify_error "$code"
+        log "result=failed exit=$code mounted=$(is_mounted && echo yes || echo no)"
+    fi
+    exit "$code"
+}
+trap on_exit EXIT
+
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    log 'duplicate_event=ignored active_job=yes'
+    trap - EXIT
+    exit 0
+fi
+install -d -m 0700 "$STATE"
+log "start=$(date --iso-8601=seconds) serial=S6YGNS0Y903440H"
+
+PHASE=wait-device
+for _ in {1..30}; do [[ -e $DISK && -e $PART ]] && break; sleep 1; done
+[[ -e $DISK && -e $PART ]] || exit 20
+props=$(udevadm info --query=property --name "$DISK")
+grep -Fxq 'ID_SERIAL_SHORT=S6YGNS0Y903440H' <<<"$props" || exit 21
+grep -Eq '^ID_MODEL=(PSSD_T7_Shield|Samsung_PSSD_T7_Shield)$' <<<"$props" || exit 22
+part_type=$(blkid -s TYPE -o value "$PART")
+[[ $part_type == ext4 ]] || { log "unsupported_or_changed_filesystem=$part_type luks=no_current_method"; exit 23; }
+part_uuid=$(blkid -s UUID -o value "$PART")
+[[ $part_uuid == "$UUID" ]] || exit 24
+log "identity=ok filesystem=$part_type luks=no uuid=$part_uuid"
+
+PHASE=mount
+systemctl start mnt-T7_BACKUP.mount
+mounted_uuid=
+for _ in {1..15}; do
+    if is_mounted; then
+        mounted_source=$(findmnt -rn -o SOURCE --mountpoint "$MOUNT")
+        mounted_real=$(readlink -e "$mounted_source" 2>/dev/null || true)
+        expected_real=$(readlink -e "$PART" 2>/dev/null || true)
+        mounted_uuid=$(findmnt -rn -o UUID --mountpoint "$MOUNT")
+        [[ -n $mounted_uuid ]] || mounted_uuid=$(blkid -s UUID -o value "$mounted_source" 2>/dev/null || true)
+        [[ $mounted_uuid == "$UUID" && $mounted_real == "$expected_real" ]] && break
+    fi
+    sleep 1
+done
+is_mounted || exit 30
+log "postmount_source=${mounted_source:-none} source_real=${mounted_real:-none} expected_real=${expected_real:-none} mounted_uuid=${mounted_uuid:-none}"
+[[ $mounted_uuid == "$UUID" && $mounted_real == "$expected_real" ]] || exit 33
+/usr/local/libexec/t7-restic-backup snapshots >/dev/null
+[[ -f $REPO/config && -d $REPO/data && -d $REPO/keys ]] || exit 31
+free_bytes=$(df -B1 --output=avail "$MOUNT" | tail -n1 | tr -d ' ')
+[[ $free_bytes =~ ^[0-9]+$ && $free_bytes -ge $MIN_FREE_BYTES ]] || exit 32
+probe="$MOUNT/.t7-backup-probe-$JOB_ID"
+printf '%s\n' "$ACTIVITY_ID" >"$probe"
+sync -f "$probe"
+rm -f -- "$probe"
+log "mount=verified free_bytes=$free_bytes repository=verified"
+
+if [[ ${T7_TEST_FAIL_PHASE:-} == backup ]]; then PHASE=backup; log 'controlled_failure=injected'; exit 97; fi
+PHASE=backup
+/usr/local/libexec/t7-restic-backup backup
+log 'backup=success retention=success'
+
+state_file=$STATE/maintenance.state
+last_prune=0; last_light=0; last_full=0
+if [[ -f $state_file ]]; then
+    source "$state_file"
+fi
+for value in "$last_prune" "$last_light" "$last_full"; do [[ $value =~ ^[0-9]+$ ]] || exit 40; done
+now=$(date +%s)
+check_result=skipped; prune_result=skipped
+if (( now - last_full >= 2592000 )); then
+    PHASE=check-full; /usr/local/libexec/t7-restic-backup check-full
+    last_full=$now; last_light=$now; check_result=full
+elif (( now - last_light >= 604800 )); then
+    PHASE=check-light; /usr/local/libexec/t7-restic-backup check-light
+    last_light=$now; check_result=light
+fi
+if (( now - last_prune >= 604800 )); then
+    PHASE=prune; /usr/local/libexec/t7-restic-backup prune
+    last_prune=$now; prune_result=success
+fi
+tmp=$(mktemp "$STATE/.maintenance.XXXXXX")
+printf 'last_prune=%s\nlast_light=%s\nlast_full=%s\n' "$last_prune" "$last_light" "$last_full" >"$tmp"
+chmod 0600 "$tmp"; mv -f "$tmp" "$state_file"
+log "maintenance_check=$check_result maintenance_prune=$prune_result"
+
+PHASE=sync
+timeout 300 sync -f "$MOUNT"
+PHASE=unmount
+if ! timeout 60 systemctl stop mnt-T7_BACKUP.mount; then
+    log 'unmount=failed holders_follow=yes'; fuser -vm "$MOUNT" 2>&1 || true; exit 50
+fi
+is_mounted && exit 51
+log 'unmount=success luks_close=not_applicable'
+
+PHASE=notify-success
+test_arg=()
+[[ ${T7_TEST_MODE:-0} == 1 ]] && test_arg=(--test)
+TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/telegram-notify/telegram-notify.env \
+    /usr/local/libexec/t7-restic-notify success "$JOB_ID" --result-file "$STATE/last-backup.json" "${test_arg[@]}"
+NOTIFIED=yes
+printf 'job_id=%s\n' "$JOB_ID" >"$STATE/reminder.state"
+systemctl restart t7-restic-reminder.timer
+log "notification=success reminder=scheduled end=$(date --iso-8601=seconds)"
+trap - EXIT
+exit 0

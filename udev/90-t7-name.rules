@@ -1,2 +1,3 @@
-# Activity 583921 - user-facing name only; persistent identity remains serial+UUID.
+# Activity 684219 - one disk-level add event delegates long work to systemd.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ENV{ID_SERIAL_SHORT}=="S6YGNS0Y903440H", TAG+="systemd", ENV{SYSTEMD_WANTS}+="t7-restic-backup.service"
 SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_SERIAL_SHORT}=="S6YGNS0Y903440H", ENV{ID_FS_UUID}=="4c75ac03-4c73-43f8-afd9-f90db49a74fc", ENV{UDISKS_NAME}="T7"

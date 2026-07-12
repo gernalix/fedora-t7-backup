@@ -1,0 +1,48 @@
+#!/usr/bin/python3
+import json
+import os
+import sys
+import tempfile
+
+ACTIVITY_ID = "684219"
+
+if len(sys.argv) != 3:
+    raise SystemExit(64)
+source, target = sys.argv[1:]
+summary = None
+with open(source, "r", encoding="utf-8") as handle:
+    for line in handle:
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if item.get("message_type") == "summary":
+            summary = item
+if not summary or not summary.get("snapshot_id"):
+    raise SystemExit(65)
+safe = {
+    "activity_id": ACTIVITY_ID,
+    "snapshot_id": str(summary["snapshot_id"]),
+    "duration_seconds": float(summary.get("total_duration", 0)),
+    "bytes_processed": int(summary.get("total_bytes_processed", 0)),
+    "data_added": int(summary.get("data_added", 0)),
+    "data_added_packed": int(summary.get("data_added_packed", summary.get("data_added", 0))),
+    "files_processed": int(summary.get("total_files_processed", 0)),
+}
+directory = os.path.dirname(target)
+os.makedirs(directory, mode=0o700, exist_ok=True)
+fd, temporary = tempfile.mkstemp(prefix=".last-backup.", dir=directory, text=True)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(safe, handle, sort_keys=True)
+        handle.write("\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, target)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+print(
+    f"activity={ACTIVITY_ID} snapshot={safe['snapshot_id'][:8]} "
+    f"duration_seconds={safe['duration_seconds']:.3f} bytes_processed={safe['bytes_processed']} "
+    f"data_added={safe['data_added']} data_added_packed={safe['data_added_packed']}"
+)

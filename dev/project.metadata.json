@@ -8,8 +8,8 @@
   "ai_doc": "docs/ai/PROJECT.md",
   "human_doc": "docs/human/overview.md",
   "metadata_version": 1,
-  "project_version": "1.0.0",
-  "activity_id": "583921",
-  "branch": "codex/583921-fedora-t7-backup",
-  "last_indexed_at": "2026-07-12T01:20:00+02:00"
+  "project_version": "1.1.0",
+  "activity_id": "684219",
+  "branch": "codex/684219-t7-connect-backup",
+  "last_indexed_at": "2026-07-12T02:00:00+02:00"
 }
