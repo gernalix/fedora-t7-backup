@@ -19,4 +19,3 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
-
