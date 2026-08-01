@@ -20,7 +20,7 @@ INSERT INTO incidents (
   'T7 mountpoint fell through to internal root',
   'Fedora host; Samsung T7; /mnt/T7_BACKUP; fedora-t7-backup',
   'journal nonzero backup job','583921','activity 583921',
-  '/home/daniele/MegaVault/projects/fedora-t7-backup/docs/ai/INCIDENT_REGISTRY.md'
+  '/home/daniele/projects/fedora-t7-backup/docs/ai/INCIDENT_REGISTRY.md'
 )
 ON CONFLICT(incident_id) DO UPDATE SET
   last_seen_utc=excluded.last_seen_utc,
@@ -54,7 +54,7 @@ INSERT INTO incidents (
   'T7 lifecycle mount namespace blocked finalization',
   'Fedora host; systemd; udev; Samsung T7; fedora-t7-backup',
   'Telegram error notifications; journal failure','684219','activity 684219',
-  '/home/daniele/MegaVault/projects/fedora-t7-backup/docs/ai/INCIDENT_REGISTRY.md'
+  '/home/daniele/projects/fedora-t7-backup/docs/ai/INCIDENT_REGISTRY.md'
 )
 ON CONFLICT(incident_id) DO UPDATE SET
   last_seen_utc=excluded.last_seen_utc,occurrence_count=excluded.occurrence_count,
