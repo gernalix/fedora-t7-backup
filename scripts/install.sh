@@ -3,6 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly ACTIVITY_ID=684219
+readonly RESTIC_PASSWORD_FILE=/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 if [[ $EUID -ne 0 ]]; then
@@ -10,12 +11,24 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 command -v restic >/dev/null || { printf 'activity=%s ERROR restic is not installed\n' "$ACTIVITY_ID" >&2; exit 1; }
-command -v systemd-creds >/dev/null || { printf 'activity=%s ERROR systemd-creds is unavailable\n' "$ACTIVITY_ID" >&2; exit 1; }
+[[ -s $RESTIC_PASSWORD_FILE ]] || {
+    printf 'activity=%s ERROR canonical Restic password file is missing or empty: %s\n' \
+        "$ACTIVITY_ID" "$RESTIC_PASSWORD_FILE" >&2
+    exit 1
+}
+[[ $(stat -c '%U:%G' "$RESTIC_PASSWORD_FILE") == daniele:daniele ]] || {
+    printf 'activity=%s ERROR canonical Restic password owner must be daniele:daniele\n' "$ACTIVITY_ID" >&2
+    exit 1
+}
+[[ $(stat -c '%a' "$RESTIC_PASSWORD_FILE") == 600 ]] || {
+    printf 'activity=%s ERROR canonical Restic password mode must be 600\n' "$ACTIVITY_ID" >&2
+    exit 1
+}
 
 install -d -m 0755 /usr/local/libexec /usr/share/doc/fedora-t7-backup
 install -d -m 0755 /etc/udev/rules.d
 install -d -m 0750 /etc/t7-restic-backup
-install -d -m 0700 /etc/credstore.encrypted /var/lib/t7-restic-backup /var/cache/t7-restic-backup
+install -d -m 0700 /var/lib/t7-restic-backup /var/cache/t7-restic-backup
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP=/var/lib/t7-restic-backup/install-backups/activity-684219-$STAMP
 install -d -m 0700 "$BACKUP"
@@ -36,18 +49,8 @@ install -m 0644 "$ROOT/systemd/"*.service "$ROOT/systemd/"*.timer /etc/systemd/s
 rm -f /etc/udev/rules.d/90-t7-veeamre.rules
 install -m 0644 "$ROOT/udev/90-t7-name.rules" /etc/udev/rules.d/90-t7-name.rules
 
-if [[ ! -f /etc/credstore.encrypted/t7-restic-password ]]; then
-    openssl rand -base64 48 | systemd-creds encrypt --with-key=host \
-        --name=restic-password - /etc/credstore.encrypted/t7-restic-password
-    chown root:root /etc/credstore.encrypted/t7-restic-password
-    chmod 0600 /etc/credstore.encrypted/t7-restic-password
-    printf 'activity=%s INFO generated encrypted Restic credential\n' "$ACTIVITY_ID"
-else
-    printf 'activity=%s INFO preserved existing encrypted Restic credential\n' "$ACTIVITY_ID"
-fi
-
 restorecon -RF /usr/local/libexec/t7-restic-* /etc/t7-restic-backup \
-    /etc/credstore.encrypted/t7-restic-password /var/lib/t7-restic-backup \
+    "$RESTIC_PASSWORD_FILE" /var/lib/t7-restic-backup \
     /var/cache/t7-restic-backup /etc/systemd/system/t7-restic-* \
     /usr/share/doc/fedora-t7-backup 2>/dev/null || true
 systemctl daemon-reload

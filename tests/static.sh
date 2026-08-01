@@ -20,4 +20,8 @@ rg -q 'S6YGNS0Y903440H' "$ROOT/scripts/t7-restic-backup"
 rg -q '4c75ac03-4c73-43f8-afd9-f90db49a74fc' "$ROOT/scripts/t7-restic-backup"
 rg -q 'TEST CONTROLLATO' "$ROOT/scripts/t7-restic-notify"
 rg -q 'T7_TEST_FAIL_PHASE' "$ROOT/scripts/t7-restic-lifecycle"
+rg -Fq 'LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password' \
+    "$ROOT/systemd/t7-restic-backup.service"
+! rg -q 'openssl rand|LoadCredentialEncrypted=' "$ROOT/scripts/install.sh" \
+    "$ROOT/systemd/t7-restic-backup.service"
 printf 'activity=684219 static_tests=PASS\n'

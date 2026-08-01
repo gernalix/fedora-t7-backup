@@ -9,8 +9,10 @@ Il dispositivo si chiama semplicemente **T7** nel contesto operativo. Fedora lo 
 mai essere usato come destinazione.
 
 Il repository `/mnt/T7_BACKUP/restic-fedora` è cifrato da Restic. La password è
-custodita in `/etc/credstore.encrypted/t7-restic-password` (`root:root 0600`) e
-decrittata da systemd solo in RAM per la durata del servizio. Il job rifiuta
+custodita nel file canonico
+`/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password`
+(`daniele:daniele 0600`) e consegnata da systemd al servizio tramite una
+credenziale privata in RAM. Il job rifiuta
 mount assente, UUID/label/seriale/modello errati o mount ricaduto sul disco
 interno.
 
@@ -46,10 +48,10 @@ Avviare un comando transiente che riceve la credenziale senza mostrarla:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-snapshots \
-  -p LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password \
+  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
   /usr/local/libexec/t7-restic-backup snapshots
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-stats \
-  -p LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password \
+  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
   /usr/local/libexec/t7-restic-backup stats
 ```
 
@@ -59,7 +61,7 @@ Il target deve non esistere. Sostituire il path incluso con quello desiderato:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-restore \
-  -p LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password \
+  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
   /usr/local/libexec/t7-restic-backup restore latest /var/tmp/t7-restore /home/daniele/Documents/file.txt
 sudo find /var/tmp/t7-restore -maxdepth 5 -ls
 ```
@@ -74,7 +76,7 @@ ripristinare prima in una directory separata:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-restore-home \
-  -p LoadCredentialEncrypted=restic-password:/etc/credstore.encrypted/t7-restic-password \
+  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
   /usr/local/libexec/t7-restic-backup restore latest /var/tmp/t7-home-restore /home
 ```
 
@@ -85,8 +87,8 @@ ripristinare direttamente sopra una home attiva.
 
 1. Installare Fedora e Restic; non formattare il T7.
 2. Montare l'ext4 UUID atteso in `/mnt/T7_BACKUP` e verificare modello/seriale.
-3. Recuperare la password dal password manager, non dalla sola credenziale
-   cifrata legata al vecchio host.
+3. Recuperare il file password canonico o la copia di sicurezza verificata e
+   impostarlo `0600`; non rigenerare o sostituire la password.
 4. Usare `RESTIC_PASSWORD_FILE` con un file `0600` in tmpfs e `restic -r
    /mnt/T7_BACKUP/restic-fedora snapshots`.
 5. Ripristinare prima `/var/lib/t7-restic-backup/manifest` e usare elenchi RPM,
@@ -97,22 +99,12 @@ ripristinare direttamente sopra una home attiva.
 
 ## Conservare e cambiare password
 
-Passaggio manuale obbligatorio dopo l'installazione: in un terminale privato,
-decrittare la credenziale direttamente nel password manager senza salvarla su
-disco persistente:
-
-```bash
-sudo systemd-creds decrypt --name=restic-password /etc/credstore.encrypted/t7-restic-password -
-```
-
-Non incollare l'output in chat, log o repository; pulire il terminale. Per
-cambiare password, aprire una root shell privata e usare file temporanei in
-`/run` con `umask 077`: decrittare la vecchia password, creare la nuova con
-`openssl rand -base64 48`, eseguire `restic key passwd --password-file OLD
---new-password-file NEW`, cifrare `NEW` con `systemd-creds encrypt
---with-key=host --name=restic-password`, sostituire atomicamente la credenziale,
-testare `snapshots`, quindi eliminare entrambi i file in `/run`. Non rimuovere la
-vecchia chiave prima del test.
+Il file canonico non va stampato, passato come argomento, copiato nei repository
+o rigenerato dall'installer. Prima di qualsiasi rotazione, conservarne una copia
+esterna verificata, usare `restic key passwd` con file privati `0600`, testare
+listing e restore read-only, quindi sostituire atomicamente il file canonico.
+La rotazione richiede un'azione umana esplicita; non rimuovere la vecchia chiave
+prima della prova di recuperabilità.
 
 ## Inclusioni, esclusioni e database
 
@@ -139,5 +131,5 @@ Disattivazione conservativa:
 sudo ./scripts/uninstall.sh
 ```
 
-Lo script preserva repository, password cifrata, configurazione, stato e cache.
+Lo script preserva repository, password canonica, configurazione, stato e cache.
 La cancellazione di questi elementi è separata, manuale e distruttiva.
