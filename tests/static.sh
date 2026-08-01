@@ -24,4 +24,8 @@ rg -Fq 'LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedor
     "$ROOT/systemd/t7-restic-backup.service"
 ! rg -q 'openssl rand|LoadCredentialEncrypted=' "$ROOT/scripts/install.sh" \
     "$ROOT/systemd/t7-restic-backup.service"
+! rg -Fq '/home/daniele/.config/telegram-notify/telegram-notify.env' \
+    "$ROOT/scripts/t7-restic-lifecycle" "$ROOT/systemd/t7-restic-reminder.service"
+rg -Fq '/home/daniele/.config/codex/secrets/telegram.env' \
+    "$ROOT/scripts/t7-restic-lifecycle" "$ROOT/systemd/t7-restic-reminder.service"
 printf 'activity=684219 static_tests=PASS\n'

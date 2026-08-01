@@ -26,7 +26,7 @@ notify_error() {
     is_mounted && mounted=yes
     [[ $mounted == no ]] && safe=yes
     [[ ${T7_TEST_MODE:-0} == 1 || -n ${T7_TEST_FAIL_PHASE:-} ]] && test_arg=(--test)
-    TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/telegram-notify/telegram-notify.env \
+    TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
         /usr/local/libexec/t7-restic-notify error "$JOB_ID" --phase "$PHASE" \
         --exit-code "$code" --mounted "$mounted" --safe-disconnect "$safe" "${test_arg[@]}" || true
     NOTIFIED=yes
@@ -151,7 +151,7 @@ log 'unmount=success luks_close=not_applicable'
 PHASE=notify-success
 test_arg=()
 [[ ${T7_TEST_MODE:-0} == 1 ]] && test_arg=(--test)
-TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/telegram-notify/telegram-notify.env \
+TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
     /usr/local/libexec/t7-restic-notify success "$JOB_ID" --result-file "$STATE/last-backup.json" "${test_arg[@]}"
 NOTIFIED=yes
 printf 'job_id=%s\n' "$JOB_ID" >"$STATE/reminder.state"
