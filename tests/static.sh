@@ -28,4 +28,8 @@ rg -Fq 'LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedor
     "$ROOT/scripts/t7-restic-lifecycle" "$ROOT/systemd/t7-restic-reminder.service"
 rg -Fq '/home/daniele/.config/codex/secrets/telegram.env' \
     "$ROOT/scripts/t7-restic-lifecycle" "$ROOT/systemd/t7-restic-reminder.service"
+rg -Fq 'TELEGRAM_INSERT_BOT_NOISY_BOT_TOKEN' "$ROOT/scripts/t7-restic-notify"
+rg -Fq 'TELEGRAM_INSERT_BOT_NOISY_CHAT_ID' "$ROOT/scripts/t7-restic-notify"
+rg -Fq 'telegram_send=failed' "$ROOT/scripts/t7-restic-notify"
+rg -Fq 'notification_attempt=success' "$ROOT/scripts/t7-restic-lifecycle"
 printf 'activity=684219 static_tests=PASS\n'

@@ -26,6 +26,7 @@ notify_error() {
     is_mounted && mounted=yes
     [[ $mounted == no ]] && safe=yes
     [[ ${T7_TEST_MODE:-0} == 1 || -n ${T7_TEST_FAIL_PHASE:-} ]] && test_arg=(--test)
+    log "notification_attempt=error exit=$code"
     TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
         /usr/local/libexec/t7-restic-notify error "$JOB_ID" --phase "$PHASE" \
         --exit-code "$code" --mounted "$mounted" --safe-disconnect "$safe" "${test_arg[@]}" || true
@@ -69,7 +70,7 @@ if ! flock -n 9; then
     exit 0
 fi
 install -d -m 0700 "$STATE"
-log "start=$(date --iso-8601=seconds) serial=S6YGNS0Y903440H"
+log "service_started=yes trigger_received=systemd start=$(date --iso-8601=seconds) serial=S6YGNS0Y903440H"
 
 PHASE=wait-device
 for _ in {1..30}; do [[ -e $DISK && -e $PART ]] && break; sleep 1; done
@@ -151,6 +152,7 @@ log 'unmount=success luks_close=not_applicable'
 PHASE=notify-success
 test_arg=()
 [[ ${T7_TEST_MODE:-0} == 1 ]] && test_arg=(--test)
+log 'notification_attempt=success'
 TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
     /usr/local/libexec/t7-restic-notify success "$JOB_ID" --result-file "$STATE/last-backup.json" "${test_arg[@]}"
 NOTIFIED=yes

@@ -9,6 +9,38 @@ from telegram_notify import send_message
 
 ACTIVITY_ID = "684219"
 STATE = Path("/var/lib/t7-restic-backup/notifications")
+CONFIG_ENV = "TELEGRAM_NOTIFY_CONFIG"
+TOKEN_ENV = "TELEGRAM_INSERT_BOT_NOISY_BOT_TOKEN"
+CHAT_ENV = "TELEGRAM_INSERT_BOT_NOISY_CHAT_ID"
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def configure_telegram() -> str:
+    config_path = Path(os.getenv(CONFIG_ENV, "~/.config/codex/secrets/telegram.env")).expanduser()
+    _load_env_file(config_path)
+    bot_secret = os.getenv(TOKEN_ENV, "").strip()
+    chat_id = os.getenv(CHAT_ENV, "").strip()
+    missing = [name for name, value in ((TOKEN_ENV, bot_secret), (CHAT_ENV, chat_id)) if not value]
+    if missing:
+        raise RuntimeError("missing Telegram T7 configuration: " + ",".join(missing))
+    os.environ["TELEGRAM_BOT_TOKEN"] = bot_secret
+    print(f"activity={ACTIVITY_ID} telegram_config=ok token_env={TOKEN_ENV} chat_env={CHAT_ENV}")
+    return chat_id
 
 parser = argparse.ArgumentParser()
 parser.add_argument("kind", choices=("success", "error", "reminder"))
@@ -64,9 +96,19 @@ else:
 timestamp = dt.datetime.now(dt.timezone.utc).isoformat()
 with (STATE / "events.log").open("a", encoding="utf-8") as handle:
     handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} pending\n")
-send_message(title, message)
+chat_id = configure_telegram()
+try:
+    send_message(title, message, chat_id=chat_id)
+except Exception as exc:
+    error = str(exc).replace("\r", " ").replace("\n", " ")[:500]
+    with (STATE / "events.log").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} failed error={error}\n"
+        )
+    print(f"activity={ACTIVITY_ID} notification={args.kind} telegram_send=failed error={error}")
+    raise
 marker.write_text(timestamp + "\n", encoding="utf-8")
 os.chmod(marker, 0o600)
 with (STATE / "events.log").open("a", encoding="utf-8") as handle:
     handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} sent\n")
-print(f"activity={ACTIVITY_ID} notification={args.kind} sent=yes job={args.job_id}")
+print(f"activity={ACTIVITY_ID} notification={args.kind} telegram_send=sent sent=yes job={args.job_id}")
