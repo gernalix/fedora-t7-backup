@@ -9,9 +9,11 @@ job_id=$(sed -n 's/^job_id=//p' "$STATE")
 [[ $job_id =~ ^[A-Za-z0-9-]+$ ]] || exit 65
 if [[ ! -e $DISK ]]; then
     printf 'activity=%s reminder=device_absent notification=no\n' "$ACTIVITY_ID"
+    unlink -- "$STATE"
     exit 0
 fi
 props=$(udevadm info --query=property --name "$DISK")
 grep -Fxq 'ID_SERIAL_SHORT=S6YGNS0Y903440H' <<<"$props" || exit 66
 mountpoint -q /mnt/T7_BACKUP && { printf 'activity=%s reminder=mounted notification=no\n' "$ACTIVITY_ID"; exit 67; }
 /usr/local/libexec/t7-restic-notify reminder "$job_id"
+unlink -- "$STATE"

@@ -4,14 +4,14 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 bash -n "$ROOT/scripts/t7-restic-backup" "$ROOT/scripts/t7-restic-lifecycle" \
     "$ROOT/scripts/t7-restic-reminder" "$ROOT/scripts/install.sh" "$ROOT/scripts/uninstall.sh" \
-    "$ROOT/scripts/register-incident.sh" "$ROOT/tests/simulate-absent.sh"
+    "$ROOT/scripts/register-incident.sh" "$ROOT/scripts/t7-udev-verify" "$ROOT/tests/simulate-absent.sh"
 PYTHONPYCACHEPREFIX=/tmp/activity-684219-pycache python3 -m py_compile \
-    "$ROOT/scripts/t7-restic-metrics" "$ROOT/scripts/t7-restic-notify"
+    "$ROOT/scripts/t7-restic-metrics" "$ROOT/scripts/t7-restic-notify" "$ROOT/tests/test_behavior.py"
 verify_output=$(systemd-analyze verify "$ROOT/systemd/"*.service "$ROOT/systemd/"*.timer 2>&1 || true)
 unexpected=$(sed '/Command \/usr\/local\/libexec\/t7-restic-.* is not executable: No such file or directory/d' <<<"$verify_output")
 [[ -z $unexpected ]] || { printf '%s\n' "$unexpected" >&2; exit 1; }
 if rg -n -i '(^|[^A-Z_])password\s*=\s*\S+|(^|[^A-Z_])token\s*=\s*\S+|gho_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+' "$ROOT" \
-    --glob '!tests/static.sh' --glob '!docs/human/OPERATIONS.md'; then
+    --glob '!tests/static.sh' --glob '!tests/test_behavior.py' --glob '!docs/human/OPERATIONS.md'; then
     printf 'activity=684219 secret_scan=FAIL\n' >&2
     exit 1
 fi
@@ -32,4 +32,8 @@ rg -Fq 'TELEGRAM_INSERT_BOT_NOISY_BOT_TOKEN' "$ROOT/scripts/t7-restic-notify"
 rg -Fq 'TELEGRAM_INSERT_BOT_NOISY_CHAT_ID' "$ROOT/scripts/t7-restic-notify"
 rg -Fq 'telegram_send=failed' "$ROOT/scripts/t7-restic-notify"
 rg -Fq 'notification_attempt=success' "$ROOT/scripts/t7-restic-lifecycle"
+rg -Fq 'flush-queue' "$ROOT/scripts/t7-restic-notify" "$ROOT/systemd/t7-restic-notify-retry.service"
+rg -Fq 'trigger_executed=no' "$ROOT/scripts/t7-udev-verify"
+! rg -Fq 'udevadm trigger --action=change' "$ROOT/scripts/install.sh"
+rg -Fq 'systemctl enable --now t7-restic-notify-retry.timer' "$ROOT/scripts/install.sh"
 printf 'activity=684219 static_tests=PASS\n'

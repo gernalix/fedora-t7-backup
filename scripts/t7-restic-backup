@@ -106,6 +106,41 @@ require_repository() {
         die 60 "Restic repository is missing or incomplete at $REPOSITORY"
 }
 
+restic_stale_unlock() {
+    log WARNING "restic_lock_detected action=${ACTION:-unknown} unlock=stale_only"
+    restic unlock
+}
+
+run_restic() {
+    local code
+    set +e
+    restic "$@"
+    code=$?
+    set -e
+    if [[ $code -eq 11 ]]; then
+        restic_stale_unlock
+        restic "$@"
+        return
+    fi
+    return "$code"
+}
+
+run_restic_json() {
+    local output=$1
+    shift
+    local code
+    set +e
+    restic "$@" >"$output"
+    code=$?
+    set -e
+    if [[ $code -eq 11 ]]; then
+        restic_stale_unlock
+        restic "$@" >"$output"
+        return
+    fi
+    return "$code"
+}
+
 capture_manifest() {
     local next=$STATE_DIR/manifest.next
     local current=$STATE_DIR/manifest
@@ -170,15 +205,14 @@ run_backup() {
         [[ -e $path ]] && paths+=("$path")
     done
     capture_manifest
-    restic unlock
     log INFO "backup_start repository=$REPOSITORY"
     BACKUP_JSON_TMP=$(mktemp /run/t7-restic-backup-result.XXXXXX.json)
-    restic backup --json --one-file-system --exclude-file "$EXCLUDES" \
-        --tag "activity-$ACTIVITY_ID" --tag fedora-system "${paths[@]}" >"$BACKUP_JSON_TMP"
+    run_restic_json "$BACKUP_JSON_TMP" backup --json --retry-lock 2m --one-file-system \
+        --exclude-file "$EXCLUDES" --tag "activity-$ACTIVITY_ID" --tag fedora-system "${paths[@]}"
     /usr/local/libexec/t7-restic-metrics "$BACKUP_JSON_TMP" "$STATE_DIR/last-backup.json"
     rm -f -- "$BACKUP_JSON_TMP"
     BACKUP_JSON_TMP=
-    restic forget --quiet --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
+    run_restic forget --quiet --retry-lock 2m --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
         --group-by host,paths
     log INFO 'backup_success retention_applied=yes'
 }
@@ -191,7 +225,7 @@ run_restore() {
         die 80 'restore target must be a safe absolute path outside the T7'
     [[ -n $include && $include == /* ]] || die 81 'restore include must be an absolute backed-up path'
     [[ ! -e $target ]] || die 82 'restore target already exists'
-    restic restore "$snapshot" --target "$target" --include "$include"
+    run_restic restore "$snapshot" --retry-lock 2m --target "$target" --include "$include"
     log INFO "restore_success snapshot=$snapshot target=$target include=$include"
 }
 
@@ -207,10 +241,10 @@ case "$ACTION" in
     init)
         if [[ -e $REPOSITORY ]]; then
             require_repository
-            restic cat config >/dev/null
+            run_restic cat config >/dev/null
             log INFO 'repository_exists_and_opens=yes'
         else
-            restic init
+            run_restic init
             chmod 0700 "$REPOSITORY"
             log INFO "repository_initialized=$REPOSITORY encrypted=yes"
         fi
@@ -221,30 +255,27 @@ case "$ACTION" in
         ;;
     check-light)
         require_repository
-        restic unlock
-        restic check --read-data-subset=5%
+        run_restic check --retry-lock 2m --read-data-subset=5%
         log INFO 'check_light_success=yes subset=5%'
         ;;
     check-full)
         require_repository
-        restic unlock
-        restic check --read-data
+        run_restic check --retry-lock 2m --read-data
         log INFO 'check_full_success=yes read_data=all'
         ;;
     prune)
         require_repository
-        restic unlock
-        restic forget --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
+        run_restic forget --retry-lock 2m --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 3 \
             --group-by host,paths --prune
         log INFO 'retention_prune_success=yes'
         ;;
     snapshots)
         require_repository
-        restic snapshots --group-by host,paths
+        run_restic snapshots --retry-lock 2m --group-by host,paths
         ;;
     stats)
         require_repository
-        restic stats --mode raw-data
+        run_restic stats --retry-lock 2m --mode raw-data
         ;;
     restore)
         require_repository

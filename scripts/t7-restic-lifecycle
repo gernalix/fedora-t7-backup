@@ -11,6 +11,7 @@ readonly REPO=$MOUNT/restic-fedora
 readonly STATE=/var/lib/t7-restic-backup
 readonly LOCK=/run/t7-restic-connect.lock
 readonly MIN_FREE_BYTES=$((10 * 1024 * 1024 * 1024))
+readonly NOTIFY_BIN=${T7_NOTIFY_BIN:-/usr/local/libexec/t7-restic-notify}
 PHASE=start
 JOB_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 NOTIFIED=no
@@ -28,7 +29,7 @@ notify_error() {
     [[ ${T7_TEST_MODE:-0} == 1 || -n ${T7_TEST_FAIL_PHASE:-} ]] && test_arg=(--test)
     log "notification_attempt=error exit=$code"
     TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
-        /usr/local/libexec/t7-restic-notify error "$JOB_ID" --phase "$PHASE" \
+        "$NOTIFY_BIN" error "$JOB_ID" --phase "$PHASE" \
         --exit-code "$code" --mounted "$mounted" --safe-disconnect "$safe" "${test_arg[@]}" || true
     NOTIFIED=yes
 }
@@ -154,7 +155,7 @@ test_arg=()
 [[ ${T7_TEST_MODE:-0} == 1 ]] && test_arg=(--test)
 log 'notification_attempt=success'
 TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env \
-    /usr/local/libexec/t7-restic-notify success "$JOB_ID" --result-file "$STATE/last-backup.json" "${test_arg[@]}"
+    "$NOTIFY_BIN" success "$JOB_ID" --result-file "$STATE/last-backup.json" "${test_arg[@]}"
 NOTIFIED=yes
 printf 'job_id=%s\n' "$JOB_ID" >"$STATE/reminder.state"
 systemctl restart t7-restic-reminder.timer

@@ -1,0 +1,34 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+
+readonly ACTIVITY_ID=684219
+readonly DEFAULT_DISK=/dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0
+device=${1:-$DEFAULT_DISK}
+
+if [[ -n ${T7_UDEV_TEST_OUTPUT:-} ]]; then
+    test_output=$(<"$T7_UDEV_TEST_OUTPUT")
+    grep -Fq 'SYSTEMD_WANTS=' <<<"$test_output" || { printf 'activity=%s udev_verify=FAIL reason=systemd_wants_missing\n' "$ACTIVITY_ID" >&2; exit 1; }
+    grep -Fq 't7-restic-backup.service' <<<"$test_output" || { printf 'activity=%s udev_verify=FAIL reason=t7_service_missing\n' "$ACTIVITY_ID" >&2; exit 1; }
+    printf 'activity=%s udev_verify=PASS action=add devtype=disk systemd_wants=t7-restic-backup.service trigger_executed=no source=test_output\n' "$ACTIVITY_ID"
+    exit 0
+fi
+
+if [[ ! -e $device ]]; then
+    printf 'activity=%s udev_verify=physical_reconnect_required device_absent=yes\n' "$ACTIVITY_ID"
+    exit 0
+fi
+
+real_device=$(readlink -e -- "$device")
+kernel_name=$(basename "$real_device")
+sys_path=/sys/block/$kernel_name
+[[ -d $sys_path ]] || { printf 'activity=%s udev_verify=FAIL reason=not_disk device=%s\n' "$ACTIVITY_ID" "$real_device" >&2; exit 1; }
+
+props=$(udevadm info --query=property --name "$real_device")
+grep -Fxq 'DEVTYPE=disk' <<<"$props" || { printf 'activity=%s udev_verify=FAIL reason=not_disk\n' "$ACTIVITY_ID" >&2; exit 1; }
+grep -Fxq 'ID_BUS=usb' <<<"$props" || { printf 'activity=%s udev_verify=FAIL reason=not_usb\n' "$ACTIVITY_ID" >&2; exit 1; }
+grep -Fxq 'ID_SERIAL_SHORT=S6YGNS0Y903440H' <<<"$props" || { printf 'activity=%s udev_verify=FAIL reason=serial_mismatch\n' "$ACTIVITY_ID" >&2; exit 1; }
+
+test_output=$(udevadm test --action=add "$sys_path" 2>&1)
+grep -Fq 'SYSTEMD_WANTS=' <<<"$test_output" || { printf 'activity=%s udev_verify=FAIL reason=systemd_wants_missing\n' "$ACTIVITY_ID" >&2; exit 1; }
+grep -Fq 't7-restic-backup.service' <<<"$test_output" || { printf 'activity=%s udev_verify=FAIL reason=t7_service_missing\n' "$ACTIVITY_ID" >&2; exit 1; }
+printf 'activity=%s udev_verify=PASS action=add devtype=disk systemd_wants=t7-restic-backup.service trigger_executed=no\n' "$ACTIVITY_ID"

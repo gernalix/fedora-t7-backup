@@ -3,112 +3,358 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
+import shlex
+import sys
+import time
 from pathlib import Path
 
 from telegram_notify import send_message
 
 ACTIVITY_ID = "684219"
-STATE = Path("/var/lib/t7-restic-backup/notifications")
+DEFAULT_STATE = Path("/var/lib/t7-restic-backup/notifications")
 CONFIG_ENV = "TELEGRAM_NOTIFY_CONFIG"
 TOKEN_ENV = "TELEGRAM_INSERT_BOT_NOISY_BOT_TOKEN"
 CHAT_ENV = "TELEGRAM_INSERT_BOT_NOISY_CHAT_ID"
+GENERIC_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
+BACKOFF_SECONDS = (60, 300, 900, 3600, 10800)
+MAX_ATTEMPTS = 5
+MAX_EVENTS_BYTES = 256 * 1024
+KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
 
-def _load_env_file(path: Path) -> None:
-    if not path.exists():
+class ConfigError(RuntimeError):
+    pass
+
+
+class ResultError(RuntimeError):
+    pass
+
+
+def utc_now() -> dt.datetime:
+    override = os.getenv("T7_NOTIFY_NOW", "").strip()
+    if override:
+        return dt.datetime.fromtimestamp(float(override), tz=dt.timezone.utc)
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def state_dir() -> Path:
+    return Path(os.getenv("T7_NOTIFICATION_STATE", str(DEFAULT_STATE))).expanduser()
+
+
+def queue_dir(state: Path) -> Path:
+    return state / "queue"
+
+
+def failed_dir(state: Path) -> Path:
+    return state / "failed"
+
+
+def validate_job_id(job_id: str) -> None:
+    if not job_id.replace("-", "").isalnum():
+        raise SystemExit(64)
+
+
+def rotate_events_log(state: Path) -> None:
+    events = state / "events.log"
+    if not events.exists() or events.stat().st_size <= MAX_EVENTS_BYTES:
         return
-    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    previous = state / "events.log.1"
+    if previous.exists():
+        previous.unlink()
+    events.replace(previous)
+
+
+def append_event(state: Path, **fields: object) -> None:
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    rotate_events_log(state)
+    timestamp = utc_now().isoformat()
+    parts = [timestamp, f"activity={ACTIVITY_ID}"]
+    for key, value in fields.items():
+        parts.append(f"{key}={str(value).replace(chr(10), ' ')[:500]}")
+    with (state / "events.log").open("a", encoding="utf-8") as handle:
+        handle.write(" ".join(parts) + "\n")
+
+
+def marker_path(state: Path, job_id: str, kind: str) -> Path:
+    return state / f"{job_id}-{kind}.sent"
+
+
+def queued_path(state: Path, job_id: str, kind: str) -> Path:
+    return queue_dir(state) / f"{job_id}-{kind}.json"
+
+
+def parse_env_line(line: str, line_number: int) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    match = LINE_RE.match(stripped)
+    if not match:
+        raise ConfigError(f"ambiguous telegram.env line {line_number}")
+    key, raw_value = match.groups()
+    if not KEY_RE.match(key):
+        raise ConfigError(f"invalid telegram.env key at line {line_number}")
+    try:
+        values = shlex.split(raw_value, comments=True, posix=True)
+    except ValueError as exc:
+        raise ConfigError(f"invalid quoting in telegram.env line {line_number}") from exc
+    if not raw_value.strip():
+        value = ""
+    elif len(values) == 1:
+        value = values[0]
+    else:
+        raise ConfigError(f"ambiguous telegram.env value at line {line_number}")
+    return key, value
+
+
+def load_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+        parsed = parse_env_line(raw_line, line_number)
+        if parsed is None:
             continue
-        if line.lower().startswith("export "):
-            line = line[7:].strip()
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+        key, value = parsed
+        values[key] = value
+    return values
 
 
 def configure_telegram() -> str:
     config_path = Path(os.getenv(CONFIG_ENV, "~/.config/codex/secrets/telegram.env")).expanduser()
-    _load_env_file(config_path)
-    bot_secret = os.getenv(TOKEN_ENV, "").strip()
-    chat_id = os.getenv(CHAT_ENV, "").strip()
+    values = load_env_file(config_path)
+    bot_secret = os.getenv(TOKEN_ENV, values.get(TOKEN_ENV, "")).strip()
+    chat_id = os.getenv(CHAT_ENV, values.get(CHAT_ENV, "")).strip()
     missing = [name for name, value in ((TOKEN_ENV, bot_secret), (CHAT_ENV, chat_id)) if not value]
     if missing:
-        raise RuntimeError("missing Telegram T7 configuration: " + ",".join(missing))
-    os.environ["TELEGRAM_BOT_TOKEN"] = bot_secret
+        raise ConfigError("missing Telegram T7 configuration: " + ",".join(missing))
+    os.environ[TOKEN_ENV] = bot_secret
+    os.environ[CHAT_ENV] = chat_id
+    os.environ[GENERIC_TOKEN_ENV] = bot_secret
     print(f"activity={ACTIVITY_ID} telegram_config=ok token_env={TOKEN_ENV} chat_env={CHAT_ENV}")
     return chat_id
 
-parser = argparse.ArgumentParser()
-parser.add_argument("kind", choices=("success", "error", "reminder"))
-parser.add_argument("job_id")
-parser.add_argument("--result-file")
-parser.add_argument("--phase", default="unknown")
-parser.add_argument("--exit-code", type=int, default=1)
-parser.add_argument("--mounted", choices=("yes", "no"), default="no")
-parser.add_argument("--safe-disconnect", choices=("yes", "no"), default="no")
-parser.add_argument("--test", action="store_true")
-args = parser.parse_args()
-if not args.job_id.replace("-", "").isalnum():
-    raise SystemExit(64)
 
-STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
-marker = STATE / f"{args.job_id}-{args.kind}.sent"
-if marker.exists():
-    print(f"activity={ACTIVITY_ID} notification={args.kind} duplicate=ignored")
-    raise SystemExit(0)
+def redact(text: str) -> str:
+    for name in (TOKEN_ENV, CHAT_ENV, GENERIC_TOKEN_ENV):
+        value = os.getenv(name, "").strip()
+        if value:
+            text = text.replace(value, "<redacted>")
+    return text.replace("\r", " ").replace("\n", " ")[:500]
 
-if args.kind == "success":
-    if not args.result_file:
-        raise SystemExit(64)
-    data = json.loads(Path(args.result_file).read_text(encoding="utf-8"))
-    duration = max(0, round(float(data["duration_seconds"])))
-    added = int(data["data_added_packed"])
-    snapshot = str(data["snapshot_id"])[:8]
-    title = "TEST - Backup T7 completato" if args.test else "Backup T7 completato"
-    message = (
-        ("TEST CONTROLLATO.\n" if args.test else "")
-        + "Backup T7 completato con successo.\n"
-        f"Durata: {duration} s\nSnapshot: {snapshot}\nDati scritti nel repository: {added} byte\n"
-        "Il Samsung T7 è stato smontato in sicurezza e può essere scollegato."
-    )
-elif args.kind == "error":
-    title = "TEST - Backup T7 fallito" if args.test else "Backup T7 fallito"
-    disconnect = "sì" if args.safe_disconnect == "yes" else "no"
-    message = (
-        ("TEST CONTROLLATO.\n" if args.test else "")
-        + "Backup T7 fallito.\n"
-        f"Fase: {args.phase}\nExit code: {args.exit_code}\n"
-        f"T7 montato: {args.mounted}\nPuò essere scollegato: {disconnect}\n"
-        "Log: sudo journalctl -u t7-restic-backup.service -n 200"
-    )
-else:
-    title = "TEST - Promemoria T7" if args.test else "Promemoria T7"
-    message = (
-        ("TEST CONTROLLATO.\n" if args.test else "")
-        + "Il Samsung T7 è ancora collegato.\n"
-        "Il backup è già terminato e il disco è smontato: puoi scollegarlo fisicamente."
-    )
 
-timestamp = dt.datetime.now(dt.timezone.utc).isoformat()
-with (STATE / "events.log").open("a", encoding="utf-8") as handle:
-    handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} pending\n")
-chat_id = configure_telegram()
-try:
-    send_message(title, message, chat_id=chat_id)
-except Exception as exc:
-    error = str(exc).replace("\r", " ").replace("\n", " ")[:500]
-    with (STATE / "events.log").open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} failed error={error}\n"
+def load_result_file(path_text: str | None) -> dict[str, object]:
+    if not path_text:
+        raise ResultError("missing result file")
+    path = Path(path_text)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ResultError("result file missing") from exc
+    except json.JSONDecodeError as exc:
+        raise ResultError("result file invalid json") from exc
+    required = ("duration_seconds", "data_added_packed", "snapshot_id")
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise ResultError("result file missing keys: " + ",".join(missing))
+    try:
+        return {
+            "duration_seconds": max(0, round(float(data["duration_seconds"]))),
+            "data_added_packed": int(data["data_added_packed"]),
+            "snapshot_id": str(data["snapshot_id"])[:8],
+        }
+    except (TypeError, ValueError) as exc:
+        raise ResultError("result file has invalid value types") from exc
+
+
+def build_record(args: argparse.Namespace) -> dict[str, object]:
+    if args.kind == "success":
+        result = load_result_file(args.result_file)
+        title = "TEST - Backup T7 completato" if args.test else "Backup T7 completato"
+        message = (
+            ("TEST CONTROLLATO.\n" if args.test else "")
+            + "Backup T7 completato con successo.\n"
+            f"Durata: {result['duration_seconds']} s\nSnapshot: {result['snapshot_id']}\n"
+            f"Dati scritti nel repository: {result['data_added_packed']} byte\n"
+            "Il Samsung T7 è stato smontato in sicurezza e può essere scollegato."
         )
-    print(f"activity={ACTIVITY_ID} notification={args.kind} telegram_send=failed error={error}")
-    raise
-marker.write_text(timestamp + "\n", encoding="utf-8")
-os.chmod(marker, 0o600)
-with (STATE / "events.log").open("a", encoding="utf-8") as handle:
-    handle.write(f"{timestamp} activity={ACTIVITY_ID} job={args.job_id} kind={args.kind} sent\n")
-print(f"activity={ACTIVITY_ID} notification={args.kind} telegram_send=sent sent=yes job={args.job_id}")
+    elif args.kind == "error":
+        title = "TEST - Backup T7 fallito" if args.test else "Backup T7 fallito"
+        disconnect = "si" if args.safe_disconnect == "yes" else "no"
+        message = (
+            ("TEST CONTROLLATO.\n" if args.test else "")
+            + "Backup T7 fallito.\n"
+            f"Fase: {args.phase}\nExit code: {args.exit_code}\n"
+            f"T7 montato: {args.mounted}\nPuo essere scollegato: {disconnect}\n"
+            "Log: sudo journalctl -u t7-restic-backup.service -n 200"
+        )
+    else:
+        title = "TEST - Promemoria T7" if args.test else "Promemoria T7"
+        message = (
+            ("TEST CONTROLLATO.\n" if args.test else "")
+            + "Il Samsung T7 e ancora collegato.\n"
+            "Il backup e gia terminato e il disco e smontato: puoi scollegarlo fisicamente."
+        )
+    return {
+        "version": 1,
+        "job_id": args.job_id,
+        "kind": args.kind,
+        "title": title,
+        "message": message,
+        "attempts": 0,
+        "next_attempt_at": 0,
+        "created_at": utc_now().isoformat(),
+        "test": bool(args.test),
+    }
+
+
+def write_json_atomic(path: Path, data: dict[str, object]) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name("." + path.name + ".tmp")
+    temporary.write_text(json.dumps(data, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+
+
+def queue_failure(state: Path, record: dict[str, object], error: str) -> None:
+    path = queued_path(state, str(record["job_id"]), str(record["kind"]))
+    existing = None
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    queued = existing or record
+    attempts = int(queued.get("attempts", 0)) + 1
+    queued["attempts"] = attempts
+    queued["last_error"] = error
+    queued["last_attempt_at"] = utc_now().isoformat()
+    if attempts >= int(os.getenv("T7_NOTIFY_MAX_ATTEMPTS", str(MAX_ATTEMPTS))):
+        failed = failed_dir(state) / path.name
+        queued["exhausted_at"] = utc_now().isoformat()
+        write_json_atomic(failed, queued)
+        if path.exists():
+            path.unlink()
+        append_event(state, job=queued["job_id"], kind=queued["kind"], notification="failed", retry="exhausted")
+        print(
+            f"activity={ACTIVITY_ID} notification={queued['kind']} telegram_send=failed "
+            f"queued=no retry=exhausted attempts={attempts} error={error}"
+        )
+        return
+    backoff = backoff_seconds()[min(attempts - 1, len(backoff_seconds()) - 1)]
+    queued["next_attempt_at"] = time.time() + backoff
+    write_json_atomic(path, queued)
+    append_event(
+        state,
+        job=queued["job_id"],
+        kind=queued["kind"],
+        notification="queued",
+        attempts=attempts,
+        next_attempt_seconds=backoff,
+        error=error,
+    )
+    print(
+        f"activity={ACTIVITY_ID} notification={queued['kind']} telegram_send=failed "
+        f"queued=yes attempts={attempts} next_attempt_seconds={backoff} error={error}"
+    )
+
+
+def backoff_seconds() -> tuple[int, ...]:
+    raw = os.getenv("T7_NOTIFY_BACKOFF_SECONDS", "").strip()
+    if not raw:
+        return BACKOFF_SECONDS
+    values = tuple(max(0, int(item.strip())) for item in raw.split(",") if item.strip())
+    return values or BACKOFF_SECONDS
+
+
+def send_record(state: Path, record: dict[str, object]) -> bool:
+    kind = str(record["kind"])
+    job_id = str(record["job_id"])
+    marker = marker_path(state, job_id, kind)
+    if marker.exists():
+        print(f"activity={ACTIVITY_ID} notification={kind} duplicate=ignored sent_marker=yes")
+        return True
+    append_event(state, job=job_id, kind=kind, notification="pending")
+    try:
+        chat_id = configure_telegram()
+        send_message(str(record["title"]), str(record["message"]), chat_id=chat_id)
+    except Exception as exc:
+        queue_failure(state, record, redact(str(exc)))
+        return False
+    timestamp = utc_now().isoformat()
+    marker.write_text(timestamp + "\n", encoding="utf-8")
+    os.chmod(marker, 0o600)
+    queued = queued_path(state, job_id, kind)
+    if queued.exists():
+        queued.unlink()
+    append_event(state, job=job_id, kind=kind, notification="sent")
+    print(f"activity={ACTIVITY_ID} notification={kind} telegram_send=sent sent=yes job={job_id}")
+    return True
+
+
+def flush_queue(state: Path) -> int:
+    queue = queue_dir(state)
+    if not queue.exists():
+        print(f"activity={ACTIVITY_ID} notification_queue=empty")
+        return 0
+    attempted = 0
+    failed = 0
+    now = time.time()
+    for path in sorted(queue.glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        marker = marker_path(state, str(record["job_id"]), str(record["kind"]))
+        if marker.exists():
+            path.unlink()
+            print(
+                f"activity={ACTIVITY_ID} notification={record['kind']} duplicate=ignored "
+                f"sent_marker=yes queue_removed=yes"
+            )
+            continue
+        next_attempt_at = float(record.get("next_attempt_at", 0))
+        if next_attempt_at > now:
+            wait = round(next_attempt_at - now)
+            print(f"activity={ACTIVITY_ID} notification={record['kind']} retry=deferred seconds={wait}")
+            continue
+        attempted += 1
+        if not send_record(state, record):
+            failed += 1
+    print(f"activity={ACTIVITY_ID} notification_queue=processed attempted={attempted} failed={failed}")
+    return 75 if failed else 0
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    if argv and argv[0] == "flush-queue":
+        return argparse.Namespace(command="flush-queue")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("kind", choices=("success", "error", "reminder"))
+    parser.add_argument("job_id")
+    parser.add_argument("--result-file")
+    parser.add_argument("--phase", default="unknown")
+    parser.add_argument("--exit-code", type=int, default=1)
+    parser.add_argument("--mounted", choices=("yes", "no"), default="no")
+    parser.add_argument("--safe-disconnect", choices=("yes", "no"), default="no")
+    parser.add_argument("--test", action="store_true")
+    args = parser.parse_args(argv)
+    args.command = "notify"
+    return args
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    state = state_dir()
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if args.command == "flush-queue":
+        return flush_queue(state)
+    validate_job_id(args.job_id)
+    marker = marker_path(state, args.job_id, args.kind)
+    if marker.exists():
+        print(f"activity={ACTIVITY_ID} notification={args.kind} duplicate=ignored sent_marker=yes")
+        return 0
+    try:
+        record = build_record(args)
+    except ResultError as exc:
+        print(f"activity={ACTIVITY_ID} notification={args.kind} result_file=invalid error={exc}", file=sys.stderr)
+        return 65
+    return 0 if send_record(state, record) else 75
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

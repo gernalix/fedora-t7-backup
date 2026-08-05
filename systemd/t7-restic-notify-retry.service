@@ -1,0 +1,21 @@
+[Unit]
+Description=Activity 684219 retry queued T7 Telegram notifications
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/t7-restic-notify flush-queue
+Environment=TELEGRAM_NOTIFY_CONFIG=/home/daniele/.config/codex/secrets/telegram.env
+StateDirectory=t7-restic-backup
+UMask=0077
+TimeoutStartSec=2m
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/t7-restic-backup
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes

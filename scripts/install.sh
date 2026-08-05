@@ -33,12 +33,13 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP=/var/lib/t7-restic-backup/install-backups/activity-684219-$STAMP
 install -d -m 0700 "$BACKUP"
 for old in /usr/local/libexec/t7-restic-backup /etc/systemd/system/t7-restic-*.service \
-    /etc/systemd/system/t7-restic-*.timer /etc/udev/rules.d/90-t7-name.rules; do
+    /usr/local/libexec/t7-udev-verify /etc/systemd/system/t7-restic-*.timer \
+    /etc/udev/rules.d/90-t7-name.rules; do
     [[ -f $old ]] && cp -a -- "$old" "$BACKUP/$(basename "$old")"
 done
 install -m 0755 "$ROOT/scripts/t7-restic-backup" "$ROOT/scripts/t7-restic-lifecycle" \
     "$ROOT/scripts/t7-restic-metrics" "$ROOT/scripts/t7-restic-notify" \
-    "$ROOT/scripts/t7-restic-reminder" /usr/local/libexec/
+    "$ROOT/scripts/t7-restic-reminder" "$ROOT/scripts/t7-udev-verify" /usr/local/libexec/
 install -m 0644 "$ROOT/config/excludes.txt" /etc/t7-restic-backup/excludes.txt
 install -m 0644 "$ROOT/docs/human/OPERATIONS.md" /usr/share/doc/fedora-t7-backup/OPERATIONS.md
 systemctl disable --now t7-restic-backup.timer t7-restic-check.timer t7-restic-maintenance.timer 2>/dev/null || true
@@ -55,15 +56,13 @@ restorecon -RF /usr/local/libexec/t7-restic-* /etc/t7-restic-backup \
     /usr/share/doc/fedora-t7-backup 2>/dev/null || true
 systemctl daemon-reload
 udevadm control --reload-rules
-if [[ -e /dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0-part1 ]]; then
-    t7_device=$(readlink -e /dev/disk/by-id/usb-Samsung_PSSD_T7_Shield_S6YGNS0Y903440H-0:0-part1)
-    udevadm trigger --action=change --name-match="$t7_device" --settle
-fi
+/usr/local/libexec/t7-udev-verify
 systemd-analyze verify /etc/systemd/system/t7-restic-*.service /etc/systemd/system/t7-restic-*.timer
+systemctl enable --now t7-restic-notify-retry.timer
 if [[ ! -f /var/lib/t7-restic-backup/maintenance.state ]]; then
     now=$(date +%s)
     printf 'last_prune=%s\nlast_light=%s\nlast_full=%s\n' "$now" "$now" "$now" \
         >/var/lib/t7-restic-backup/maintenance.state
     chmod 0600 /var/lib/t7-restic-backup/maintenance.state
 fi
-printf 'activity=%s INFO installed; udev trigger active; daily/weekly/monthly timers disabled\n' "$ACTIVITY_ID"
+printf 'activity=%s INFO installed; udev verified without trigger; retry timer active; daily/weekly/monthly timers disabled\n' "$ACTIVITY_ID"
