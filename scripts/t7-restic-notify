@@ -22,6 +22,7 @@ MAX_ATTEMPTS = 5
 MAX_EVENTS_BYTES = 256 * 1024
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 LINE_RE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
+PROJECT_ID = 16
 
 
 class ConfigError(RuntimeError):
@@ -168,6 +169,17 @@ def load_result_file(path_text: str | None) -> dict[str, object]:
         raise ResultError("result file has invalid value types") from exc
 
 
+def human_bytes(value: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    amount = float(max(0, value))
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} B"
+            return f"{amount:.2f} {unit}"
+        amount /= 1024
+
+
 def build_record(args: argparse.Namespace) -> dict[str, object]:
     if args.kind == "success":
         result = load_result_file(args.result_file)
@@ -176,19 +188,29 @@ def build_record(args: argparse.Namespace) -> dict[str, object]:
             ("TEST CONTROLLATO.\n" if args.test else "")
             + "Backup T7 completato con successo.\n"
             f"Durata: {result['duration_seconds']} s\nSnapshot: {result['snapshot_id']}\n"
-            f"Dati scritti nel repository: {result['data_added_packed']} byte\n"
+            f"Dati scritti nel repository: {human_bytes(result['data_added_packed'])}\n"
             "Il Samsung T7 è stato smontato in sicurezza e può essere scollegato."
         )
     elif args.kind == "error":
-        title = "TEST - Backup T7 fallito" if args.test else "Backup T7 fallito"
+        unavailable = args.mounted == "no" and args.exit_code in {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
+        title_text = "Backup T7 non eseguito" if unavailable else "Backup T7 fallito"
+        title = f"TEST - {title_text}" if args.test else title_text
         disconnect = "si" if args.safe_disconnect == "yes" else "no"
-        message = (
-            ("TEST CONTROLLATO.\n" if args.test else "")
-            + "Backup T7 fallito.\n"
-            f"Fase: {args.phase}\nExit code: {args.exit_code}\n"
-            f"T7 montato: {args.mounted}\nPuo essere scollegato: {disconnect}\n"
-            "Log: sudo journalctl -u t7-restic-backup.service -n 200"
-        )
+        if unavailable:
+            message = (
+                ("TEST CONTROLLATO.\n" if args.test else "")
+                + "Backup T7 non eseguito: il disco non è disponibile o non è montato come T7 verificato.\n"
+                "Azione richiesta: collega il Samsung T7 corretto e riprova il job.\n"
+                f"Dettagli: fase {args.phase}, exit code {args.exit_code}, T7 montato: {args.mounted}."
+            )
+        else:
+            message = (
+                ("TEST CONTROLLATO.\n" if args.test else "")
+                + "Backup T7 fallito durante l'esecuzione.\n"
+                "Azione richiesta: controlla il log del servizio prima di scollegare il disco.\n"
+                f"Dettagli: fase {args.phase}, exit code {args.exit_code}, T7 montato: {args.mounted}, puo essere scollegato: {disconnect}.\n"
+                "Log: sudo journalctl -u t7-restic-backup.service -n 200"
+            )
     else:
         title = "TEST - Promemoria T7" if args.test else "Promemoria T7"
         message = (
@@ -275,7 +297,7 @@ def send_record(state: Path, record: dict[str, object]) -> bool:
     append_event(state, job=job_id, kind=kind, notification="pending")
     try:
         chat_id = configure_telegram()
-        send_message(str(record["title"]), str(record["message"]), chat_id=chat_id)
+        send_message(str(record["title"]), str(record["message"]), chat_id=chat_id, project_id=PROJECT_ID)
     except Exception as exc:
         queue_failure(state, record, redact(str(exc)))
         return False

@@ -26,12 +26,13 @@ class NotifyBehaviorTests(unittest.TestCase):
 import json
 import os
 
-def send_message(title, message, *, chat_id=None):
+def send_message(title, message, *, chat_id=None, project_id=None):
     with open(os.environ["T7_FAKE_TELEGRAM_CALLS"], "a", encoding="utf-8") as handle:
         handle.write(json.dumps({
             "title": title,
             "message": message,
             "chat_id": chat_id,
+            "project_id": project_id,
             "token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         }, sort_keys=True) + "\\n")
     if os.environ.get("T7_FAKE_TELEGRAM_MODE") == "fail":
@@ -107,6 +108,20 @@ EXTRA_VALUE = "with spaces"
         self.assertEqual(1, len(calls))
         self.assertEqual("12345678", calls[0]["chat_id"])
         self.assertEqual("noisy token", calls[0]["token"])
+        self.assertEqual(16, calls[0]["project_id"])
+
+    def test_success_uses_human_units_and_t7_unavailable_is_distinct(self):
+        self.write_env()
+        success = self.run_notify("success", "JOB10", "--result-file", str(self.result_file({"snapshot_id": "abcdef123456", "duration_seconds": 12.4, "data_added_packed": 2 * 1024 * 1024})))
+        absent = self.run_notify("error", "JOB11", "--phase", "identity", "--exit-code", "20", "--mounted", "no")
+        failure = self.run_notify("error", "JOB12", "--phase", "backup", "--exit-code", "97", "--mounted", "yes")
+        self.assertEqual([0, 0, 0], [success.returncode, absent.returncode, failure.returncode])
+        calls = self.calls_json()
+        self.assertIn("2.00 MiB", calls[0]["message"])
+        self.assertEqual("Backup T7 non eseguito", calls[1]["title"])
+        self.assertIn("Azione richiesta: collega", calls[1]["message"])
+        self.assertEqual("Backup T7 fallito", calls[2]["title"])
+        self.assertIn("fallito durante l'esecuzione", calls[2]["message"])
 
     def test_missing_noisy_variables_fails_without_sending(self):
         self.write_env("TELEGRAM_BOT_TOKEN=generic\nTELEGRAM_CHAT_ID=123\n")
