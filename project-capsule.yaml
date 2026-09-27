@@ -1,0 +1,113 @@
+schema_version: c2.project-capsule.v1
+identity:
+  project_id: 16
+  slug: fedora-t7-backup
+  repository_id: R0016
+scope:
+  purpose: Create encrypted, deduplicated Restic snapshots of configured Fedora paths on a separately validated external filesystem for file-level recovery.
+  boundaries:
+    - This is not a block-level disk clone or protection against simultaneous loss of host and backup medium.
+    - MegaVault owns canonical project identity and runtime inventory; C2 owns task lifecycle.
+    - The external backup medium, systemd, udev, and shared notification transport are outside repository code.
+repository:
+  canonical_workdir: /home/daniele/projects/fedora-t7-backup
+  branch_policy: Canonical repository follows origin/main; make changes in isolated repo-task worktrees and integrate through the guarded single-writer lane.
+architecture:
+  summary: A systemd-triggered lifecycle validates the expected external filesystem before accessing the encrypted Restic repository, performs backup and configured retention/maintenance, syncs and unmounts, then sends a deduplicated notification.
+  entrypoints:
+    - scripts/t7-restic-lifecycle
+    - scripts/t7-restic-backup
+    - scripts/install.sh
+  important_paths:
+    - scripts
+    - systemd
+    - udev
+    - config
+    - tests
+    - docs/ai
+    - docs/human
+dependencies:
+  - name: Restic
+    purpose: Encrypted, compressed, deduplicated snapshot repository and restore operations.
+  - name: systemd
+    purpose: Run the privileged backup lifecycle and reminder/notification-retry units.
+  - name: udev
+    purpose: Request the systemd backup job when the matching USB device is connected.
+  - name: telegram_notify
+    purpose: Shared notification transport; this project does not implement a separate Telegram API client.
+data:
+  schema: Restic snapshots contain configured host paths and system manifests. Fedora System Monitor SQLite is captured through SQLite's online backup API; its live database, WAL, and SHM are excluded from filesystem traversal. The repository on the external medium is encrypted. This capsule omits device identifiers and credential paths.
+  migrations: No application database schema or migration framework; Restic maintains its own repository format and snapshot metadata.
+runtime:
+  services:
+    - "t7-restic-reminder.service (MegaVault inventory: static; service inactive; result success)"
+    - "t7-restic-notify-retry.service (MegaVault inventory: timer enabled and active/waiting; service inactive)"
+  timers:
+    - "t7-restic-reminder.timer (MegaVault inventory: static; inactive/dead)"
+    - "t7-restic-notify-retry.timer (MegaVault inventory: enabled; active/waiting)"
+  containers: []
+devices:
+  - The external USB filesystem is accepted only after validating its configured model, serial, filesystem UUID, label, mount, and parent disk; never use /dev/sdX as durable identity.
+commands:
+  setup:
+    not_applicable: Host dependencies and systemd integration are managed by the separately gated installer, not by a repository setup script.
+  build:
+    not_applicable: The project is shell scripts, Python scripts, systemd units, and configuration; there is no compiled build artifact.
+  test_targeted:
+    argv: [python3, -B, tests/test_behavior.py, -q]
+    cwd: .
+  test_full:
+    argv: [bash, tests/static.sh]
+    cwd: .
+  lint:
+    argv: [git, diff, --check]
+    cwd: .
+  deploy_install:
+    argv: [sudo, ./scripts/install.sh]
+    cwd: .
+  smoke:
+    not_applicable: A real backup smoke test reads or writes the external Restic repository and can send notifications; it is a separately authorized operational action.
+  verify:
+    fast:
+      argv: [python3, /home/daniele/projects/codex-roadmap/tools/project_capsule.py, --repo, ., --mode, FAST]
+      cwd: .
+    full:
+      argv: [python3, /home/daniele/projects/codex-roadmap/tools/project_capsule.py, --repo, ., --mode, FULL]
+      cwd: .
+safety:
+  invariants:
+    - Validate the exact expected mounted device before accessing the repository; a mount directory alone is not proof that the backup medium is mounted.
+    - Never reinitialize or modify an existing repository outside the validated backup lifecycle.
+    - Never format, repartition, convert, or identify a durable disk by /dev/sdX.
+    - Keep the Restic password and notification credentials out of process arguments, logs, and Git.
+    - Do not declare operational backup PASS without the real device, backup, unmount, notification, reminder, secret, and failure-recovery evidence required by the live contract.
+  risky_operations:
+    - scripts/install.sh installs or changes privileged systemd/udev integration; run only after explicit operational authorization.
+    - The backup lifecycle accesses configured host data and mutates snapshot/retention state on the external repository; do not run for source validation.
+    - Restore, prune, and repository initialization can change or expose backup data; follow docs/human/OPERATIONS.md and preserve repository recoverability.
+  recovery:
+    - Use Restic restore procedures documented in docs/human/OPERATIONS.md; do not initialize or replace the existing repository.
+    - The backup is file-level recovery and a single local medium is not off-site protection.
+acceptance:
+  - Capsule FAST and FULL validators pass against the reviewed integrated repository head.
+  - Safe unit and static checks pass without attaching or accessing the backup medium, live host state, credentials, or notification endpoints.
+  - Operational backup success and recoverability are not claimed by source-only capsule adoption; the documented live validation gate remains separate.
+references:
+  megavault: /home/daniele/MegaVault/megavault.sqlite
+  c2: /home/daniele/projects/codex-roadmap/roadmap.sqlite
+freshness:
+  reviewed_commit: f5aef95ce581510b7450867e9b19be6f9d02bd60
+  watch_paths:
+    - scripts
+    - systemd
+    - udev
+    - config
+    - tests
+    - docs/ai
+    - docs/human
+artifacts:
+  agents: AGENTS.md
+validation_hooks: []
+change_verification:
+  - paths: [scripts/**, systemd/**, udev/**, config/**, tests/**, docs/**, AGENTS.md, project-capsule.yaml]
+    commands: [test_targeted]
