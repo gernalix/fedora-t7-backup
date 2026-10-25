@@ -9,9 +9,9 @@ Il dispositivo si chiama semplicemente **T7** nel contesto operativo. Fedora lo 
 mai essere usato come destinazione.
 
 Il repository `/mnt/T7_BACKUP/restic-fedora` è cifrato da Restic. La password è
-custodita nel file canonico
-`/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password`
-(`daniele:daniele 0600`) e consegnata da systemd al servizio tramite una
+custodita in Bitwarden e materializzata nel file effimero
+`/run/bitwarden-fedora-t7/restic_password`
+(`root:root 0600`) e consegnata da systemd al servizio tramite una
 credenziale privata in RAM. Il job rifiuta
 mount assente, UUID/label/seriale/modello errati o mount ricaduto sul disco
 interno.
@@ -48,10 +48,10 @@ Avviare un comando transiente che riceve la credenziale senza mostrarla:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-snapshots \
-  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
+  -p LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password \
   /usr/local/libexec/t7-restic-backup snapshots
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-stats \
-  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
+  -p LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password \
   /usr/local/libexec/t7-restic-backup stats
 ```
 
@@ -61,7 +61,7 @@ Il target deve non esistere. Sostituire il path incluso con quello desiderato:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-restore \
-  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
+  -p LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password \
   /usr/local/libexec/t7-restic-backup restore latest /var/tmp/t7-restore /home/daniele/Documents/file.txt
 sudo find /var/tmp/t7-restore -maxdepth 5 -ls
 ```
@@ -76,7 +76,7 @@ ripristinare prima in una directory separata:
 
 ```bash
 sudo systemd-run --wait --pipe --collect --unit=t7-restic-restore-home \
-  -p LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password \
+  -p LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password \
   /usr/local/libexec/t7-restic-backup restore latest /var/tmp/t7-home-restore /home
 ```
 
@@ -96,6 +96,30 @@ ripristinare direttamente sopra una home attiva.
 6. Ripristinare `/etc`, dati applicativi, home e gli altri path in staging;
    applicare ownership e SELinux con attenzione; reinstallare bootloader e
    pacchetti secondo il nuovo sistema.
+
+## Custodia Bitwarden e recupero offline
+
+La fonte canonica è `FEDORA_T7_BACKUP_PASSWORD` nel progetto Fedora di Secrets
+Manager, campo `PASSWORD_BASE64` con i byte originali. Il runtime Fedora root
+conserva il token macchina già autorizzato in custodia cifrata sotto
+`/etc/bws-fedora`; non dipende dal portachiavi grafico. Il preparatore
+`t7-restic-vault-prepare.service` termina prima che il backup riceva il file con
+`LoadCredential`. La directory in `/run` è root 0700 e il file root 0600.
+Non avviare il backup come prova del solo collegamento alle credenziali.
+
+Ogni avvio prepara la credenziale corrente. Solo un errore di trasporto
+riconosciuto permette la cache cifrata per il backup, con un avviso esplicito e
+la data dell'ultimo recupero. Errori di autorizzazione, ambito o TLS bloccano
+l'operazione. La cache è sotto `/etc/bws-fedora/offline-backup/`; preservare la
+chiave host e le copie di ripristino protette. Il rinnovo tramite
+`fedora-store-token.py` aggiorna anche il runtime root prima di sostituire il
+token desktop; non emette né revoca token presso Bitwarden.
+
+Prima dei comandi transitori mostrati sopra, preparare il file con
+`sudo systemctl start t7-restic-vault-prepare.service`. Prima di accedere al
+disco, risolvere e verificare l'identità con `dim resolve T7 --json`.
+La copia legacy protetta resta materiale di recupero finché l'accettazione
+sul ciclo ordinario e il recupero esterno non sono completati.
 
 ## Conservare e cambiare password
 

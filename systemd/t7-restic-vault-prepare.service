@@ -1,0 +1,11 @@
+[Unit]
+Description=Prepare the Fedora T7 Restic credential from Bitwarden
+Wants=network-online.target
+After=network-online.target
+Before=t7-restic-backup.service
+
+[Service]
+Type=oneshot
+UMask=0077
+LimitCORE=0
+ExecStart=/usr/local/libexec/fedora-t7-vault-prepare
