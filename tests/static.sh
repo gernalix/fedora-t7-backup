@@ -8,7 +8,7 @@ bash -n "$ROOT/scripts/t7-restic-backup" "$ROOT/scripts/t7-restic-lifecycle" \
 PYTHONPYCACHEPREFIX=/tmp/activity-684219-pycache python3 -m py_compile \
     "$ROOT/scripts/t7-restic-metrics" "$ROOT/scripts/t7-restic-notify" "$ROOT/tests/test_behavior.py"
 verify_output=$(systemd-analyze verify "$ROOT/systemd/"*.service "$ROOT/systemd/"*.timer 2>&1 || true)
-unexpected=$(sed -E '\|Command /usr/local/libexec/(t7-restic-[^ ]+|fedora-t7-vault-prepare) is not executable: No such file or directory|d' <<<"$verify_output")
+unexpected=$(sed -E '\#Command /usr/local/libexec/(t7-restic-[^ ]+|fedora-t7-vault-prepare) is not executable: No such file or directory#d' <<<"$verify_output")
 [[ -z $unexpected ]] || { printf '%s\n' "$unexpected" >&2; exit 1; }
 if rg -n -i '(^|[^A-Z_])password\s*=\s*\S+|(^|[^A-Z_])token\s*=\s*\S+|gho_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+' "$ROOT" \
     --glob '!tests/static.sh' --glob '!tests/test_behavior.py' --glob '!docs/human/OPERATIONS.md'; then
