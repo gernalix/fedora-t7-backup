@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -123,10 +124,33 @@ def load_env_file(path: Path) -> dict[str, str]:
 
 
 def configure_telegram() -> str:
-    config_path = Path(os.getenv(CONFIG_ENV, "~/.config/codex/secrets/telegram.env")).expanduser()
-    values = load_env_file(config_path)
-    bot_secret = os.getenv(TOKEN_ENV, values.get(TOKEN_ENV, "")).strip()
-    chat_id = os.getenv(CHAT_ENV, values.get(CHAT_ENV, "")).strip()
+    reference = os.getenv("T7_TELEGRAM_REFERENCE", "")
+    if reference:
+        if reference != "FEDORA_TELEGRAM_ENV":
+            raise ConfigError("unsupported T7 Telegram vault reference")
+        environment = dict(os.environ)
+        for name in ("BWS_ACCESS_TOKEN", "RUST_LOG", "RUST_BACKTRACE", TOKEN_ENV, CHAT_ENV, GENERIC_TOKEN_ENV):
+            environment.pop(name, None)
+        try:
+            fetched = subprocess.run(
+                ["/usr/local/sbin/bws-fedora-credential", "--ref", reference,
+                 "--var", TOKEN_ENV, "--var", CHAT_ENV, "--", "/usr/bin/python3", "-c",
+                 "import json,os;print(json.dumps({k:os.environ[k] for k in " + repr((TOKEN_ENV, CHAT_ENV)) + "}))"],
+                capture_output=True, text=True, env=environment, timeout=100, check=False,
+            )
+            if fetched.returncode:
+                raise ValueError("vault unavailable")
+            values = json.loads(fetched.stdout)
+            bot_secret, chat_id = values[TOKEN_ENV].strip(), values[CHAT_ENV].strip()
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+            # send_record retains the existing queue/retry behavior. Raw vault
+            # diagnostics never become notification text or durable queue data.
+            raise ConfigError("T7 Telegram Bitwarden credential unavailable") from None
+    else:
+        config_path = Path(os.getenv(CONFIG_ENV, "~/.config/codex/secrets/telegram.env")).expanduser()
+        values = load_env_file(config_path)
+        bot_secret = os.getenv(TOKEN_ENV, values.get(TOKEN_ENV, "")).strip()
+        chat_id = os.getenv(CHAT_ENV, values.get(CHAT_ENV, "")).strip()
     missing = [name for name, value in ((TOKEN_ENV, bot_secret), (CHAT_ENV, chat_id)) if not value]
     if missing:
         raise ConfigError("missing Telegram T7 configuration: " + ",".join(missing))

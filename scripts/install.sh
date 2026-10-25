@@ -16,6 +16,10 @@ command -v restic >/dev/null || { printf 'activity=%s ERROR restic is not instal
     exit 1
 }
 /usr/local/libexec/fedora-t7-vault-prepare
+[[ -x /usr/local/sbin/bws-fedora-credential ]] || {
+    printf 'activity=%s ERROR configure the Fedora root notification credential reader first\n' "$ACTIVITY_ID" >&2
+    exit 1
+}
 [[ -s $RESTIC_PASSWORD_FILE ]] || {
     printf 'activity=%s ERROR canonical Restic password file is missing or empty: %s\n' \
         "$ACTIVITY_ID" "$RESTIC_PASSWORD_FILE" >&2
