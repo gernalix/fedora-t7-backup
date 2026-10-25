@@ -2,11 +2,13 @@
 Description=Activity 684219 automatic backup when T7 is connected
 Documentation=file:/usr/share/doc/fedora-t7-backup/OPERATIONS.md
 After=systemd-udevd.service local-fs.target
+Requires=t7-restic-vault-prepare.service
+After=t7-restic-vault-prepare.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/t7-restic-lifecycle
-LoadCredential=restic-password:/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password
+LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password
 StateDirectory=t7-restic-backup
 CacheDirectory=t7-restic-backup
 RuntimeDirectory=t7-restic-backup

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly ACTIVITY_ID=684219
-readonly RESTIC_PASSWORD_FILE=/home/daniele/.config/codex/secrets/fedora_t7_backup.restic_password
+readonly RESTIC_PASSWORD_FILE=/run/bitwarden-fedora-t7/restic_password
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 if [[ $EUID -ne 0 ]]; then
@@ -11,13 +11,18 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 command -v restic >/dev/null || { printf 'activity=%s ERROR restic is not installed\n' "$ACTIVITY_ID" >&2; exit 1; }
+[[ -x /usr/local/libexec/fedora-t7-vault-prepare ]] || {
+    printf 'activity=%s ERROR configure the Fedora root Bitwarden runtime first\n' "$ACTIVITY_ID" >&2
+    exit 1
+}
+/usr/local/libexec/fedora-t7-vault-prepare
 [[ -s $RESTIC_PASSWORD_FILE ]] || {
     printf 'activity=%s ERROR canonical Restic password file is missing or empty: %s\n' \
         "$ACTIVITY_ID" "$RESTIC_PASSWORD_FILE" >&2
     exit 1
 }
-[[ $(stat -c '%U:%G' "$RESTIC_PASSWORD_FILE") == daniele:daniele ]] || {
-    printf 'activity=%s ERROR canonical Restic password owner must be daniele:daniele\n' "$ACTIVITY_ID" >&2
+[[ $(stat -c '%U:%G' "$RESTIC_PASSWORD_FILE") == root:root ]] || {
+    printf 'activity=%s ERROR runtime Restic password owner must be root:root\n' "$ACTIVITY_ID" >&2
     exit 1
 }
 [[ $(stat -c '%a' "$RESTIC_PASSWORD_FILE") == 600 ]] || {
