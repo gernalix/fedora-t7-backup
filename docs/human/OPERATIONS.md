@@ -121,6 +121,16 @@ disco, risolvere e verificare l'identità con `dim resolve T7 --json`.
 La copia legacy protetta resta materiale di recupero finché l'accettazione
 sul ciclo ordinario e il recupero esterno non sono completati.
 
+Le tre unit di backup, reminder e retry impostano
+`T7_TELEGRAM_REFERENCE=FEDORA_TELEGRAM_ENV`. Il notifier risolve ogni invio
+tramite `/usr/local/sbin/bws-fedora-credential`, richiedendo soltanto token e
+destinazione noisy. Il runtime seleziona il token canonico condiviso nel vault.
+Quando il riferimento è impostato, non viene usato il file Telegram legacy né
+un token ereditato come ripiego. Un errore vault entra nella coda di retry già
+esistente, senza invio e senza salvare i diagnostici grezzi del provider.
+I comandi manuali del notifier devono impostare lo stesso riferimento.
+Questa selezione non avvia job, invii di prova o nuovi timer.
+
 ## Conservare e cambiare password
 
 Il file canonico non va stampato, passato come argomento, copiato nei repository

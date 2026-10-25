@@ -7,6 +7,7 @@ After=t7-restic-vault-prepare.service
 
 [Service]
 Type=oneshot
+Environment=T7_TELEGRAM_REFERENCE=FEDORA_TELEGRAM_ENV
 ExecStart=/usr/local/libexec/t7-restic-lifecycle
 LoadCredential=restic-password:/run/bitwarden-fedora-t7/restic_password
 StateDirectory=t7-restic-backup
