@@ -1,7 +1,7 @@
 # Fedora T7 Backup
 
 ## Purpose and boundaries
-This repository provides encrypted, deduplicated Restic backups of configured Fedora paths to a validated external backup filesystem. It is a file-level recovery system, not a block-level disk clone. MegaVault owns project identity and runtime inventory; C2 owns work-item lifecycle. The backup medium and notification transport are external dependencies.
+This repository provides encrypted, deduplicated Restic backups of configured Fedora paths to a validated external backup filesystem. It is a file-level recovery system, not a block-level disk clone. MegaVault owns project identity and runtime inventory; C2/C3 are frozen historical references; use the existing repository single writer for source integration. The backup medium and notification transport are external dependencies.
 
 ## Architecture
 The lifecycle script validates and mounts the expected medium, runs the backup, performs configured retention/maintenance, synchronizes and unmounts, then sends a status notification. udev can request the systemd backup unit when the expected device is attached. See `docs/ai/PROJECT.md`, `docs/human/OPERATIONS.md`, and `docs/human/overview.md`.
