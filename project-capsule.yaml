@@ -102,6 +102,8 @@ commands:
     - --tmpfs
     - /run
     - --tmpfs
+    - /etc/systemd/system
+    - --tmpfs
     - /tmp
     - --tmpfs
     - /mnt
