@@ -18,6 +18,7 @@ rm -f /etc/systemd/system/t7-restic-backup.service /etc/systemd/system/t7-restic
     /usr/local/libexec/t7-restic-reminder /usr/local/libexec/t7-udev-verify \
     /etc/udev/rules.d/90-t7-name.rules \
     /etc/udev/rules.d/90-t7-veeamre.rules
+rm -f /etc/modprobe.d/t7-usb-storage.conf /etc/tmpfiles.d/t7-usb-storage.conf
 systemctl daemon-reload
 udevadm control --reload-rules
 printf 'activity=%s INFO automation removed; repository, canonical credential, config, cache, and state preserved\n' "$ACTIVITY_ID"

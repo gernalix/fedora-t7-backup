@@ -35,7 +35,7 @@ command -v restic >/dev/null || { printf 'activity=%s ERROR restic is not instal
 }
 
 install -d -m 0755 /usr/local/libexec /usr/share/doc/fedora-t7-backup
-install -d -m 0755 /etc/udev/rules.d
+install -d -m 0755 /etc/udev/rules.d /etc/modprobe.d /etc/tmpfiles.d
 install -d -m 0750 /etc/t7-restic-backup
 install -d -m 0700 /var/lib/t7-restic-backup /var/cache/t7-restic-backup
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -50,6 +50,8 @@ install -m 0755 "$ROOT/scripts/t7-restic-backup" "$ROOT/scripts/t7-restic-lifecy
     "$ROOT/scripts/t7-restic-metrics" "$ROOT/scripts/t7-restic-notify" \
     "$ROOT/scripts/t7-restic-reminder" "$ROOT/scripts/t7-udev-verify" /usr/local/libexec/
 install -m 0644 "$ROOT/config/excludes.txt" /etc/t7-restic-backup/excludes.txt
+install -m 0644 "$ROOT/config/t7-usb-storage.conf" /etc/modprobe.d/t7-usb-storage.conf
+install -m 0644 "$ROOT/config/t7-usb-storage-tmpfiles.conf" /etc/tmpfiles.d/t7-usb-storage.conf
 install -m 0644 "$ROOT/docs/human/OPERATIONS.md" /usr/share/doc/fedora-t7-backup/OPERATIONS.md
 systemctl disable --now t7-restic-backup.timer t7-restic-check.timer t7-restic-maintenance.timer 2>/dev/null || true
 rm -f /etc/systemd/system/t7-restic-backup.timer /etc/systemd/system/t7-restic-check.service \

@@ -41,4 +41,8 @@ rg -Fq 'flush-queue' "$ROOT/scripts/t7-restic-notify" "$ROOT/systemd/t7-restic-n
 rg -Fq 'trigger_executed=no' "$ROOT/scripts/t7-udev-verify"
 ! rg -Fq 'udevadm trigger --action=change' "$ROOT/scripts/install.sh"
 rg -Fq 'systemctl enable --now t7-restic-notify-retry.timer' "$ROOT/scripts/install.sh"
+rg -Fq 'options usb-storage quirks=04e8:61fb:u' "$ROOT/config/t7-usb-storage.conf"
+rg -Fq 'w- /sys/module/usb_storage/parameters/quirks - - - - 04e8:61fb:u' "$ROOT/config/t7-usb-storage-tmpfiles.conf"
+rg -Fq 't7-usb-storage-tmpfiles.conf' "$ROOT/scripts/install.sh"
+rg -Fq '/etc/tmpfiles.d/t7-usb-storage.conf' "$ROOT/scripts/uninstall.sh"
 printf 'activity=684219 static_tests=PASS\n'
