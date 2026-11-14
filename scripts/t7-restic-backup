@@ -177,19 +177,12 @@ capture_manifest() {
     find /home/daniele/MegaVault /home/daniele/projects -xdev -maxdepth 6 -type d -name .git -printf '%h\n' 2>/dev/null | sort -u >"$next/git-repositories.txt"
 
     if [[ -f $db ]]; then
-        local sqlite_ok=false
-        local attempt
-        for attempt in 1 2 3 4 5; do
-            rm -f -- "$next/databases/fedora-system-monitor.sqlite3"
-            if timeout 90 sqlite3 -readonly -cmd '.timeout 60000' "$db" \
-                ".backup '$next/databases/fedora-system-monitor.sqlite3'"; then
-                sqlite_ok=true
-                break
-            fi
-            log WARNING "sqlite_backup_busy attempt=$attempt max=5"
-            sleep 5
-        done
-        [[ $sqlite_ok == true ]] || die 70 'consistent Fedora System Monitor SQLite backup remained locked'
+        # VACUUM INTO keeps a consistent WAL snapshot despite concurrent writes;
+        # the CLI .backup can repeatedly restart and hit its 90-second limit.
+        local sqlite_status=0
+        timeout 600 sqlite3 -readonly -cmd '.timeout 60000' "$db" \
+            "VACUUM INTO '$next/databases/fedora-system-monitor.sqlite3'" || sqlite_status=$?
+        [[ $sqlite_status -eq 0 ]] || die 70 "consistent Fedora System Monitor SQLite snapshot failed sqlite_exit=$sqlite_status"
         sqlite3 -readonly "$next/databases/fedora-system-monitor.sqlite3" 'PRAGMA integrity_check; PRAGMA foreign_key_check;' \
             >"$next/databases/fedora-system-monitor-integrity.txt"
         grep -Fxq ok "$next/databases/fedora-system-monitor-integrity.txt" ||
