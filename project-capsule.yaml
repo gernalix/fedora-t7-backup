@@ -18,11 +18,14 @@ repository:
   branch_policy: Canonical repository follows origin/main; make changes in isolated
     repo-task worktrees and integrate through the guarded single-writer lane.
 architecture:
-  summary: The systemd backup requires a successful ordered Bitwarden file-preparation
-    unit before LoadCredential. The lifecycle validates the expected external filesystem,
-    performs backup and maintenance with bounded failure-classified Restic retries,
-    syncs and unmounts; the existing notification adapter resolves selected Bitwarden
-    fields and persists a safe retry queue.
+  summary: >-
+    The systemd backup requires a successful ordered Bitwarden file-preparation unit before
+    LoadCredential. The lifecycle validates the expected external filesystem, performs backup
+    and maintenance with bounded failure-classified Restic retries, syncs and unmounts; the
+    existing notification adapter resolves selected Bitwarden fields and persists a safe retry
+    queue. The installer carries both persistent modprobe and sysfs tmpfiles configuration for
+    the supported USB storage device. The backup path still gates access and unmounts after
+    use.
   entrypoints:
   - scripts/t7-restic-lifecycle
   - scripts/t7-restic-backup
@@ -35,6 +38,8 @@ architecture:
   - tests
   - docs/ai
   - docs/human
+  - config/t7-usb-storage.conf
+  - config/t7-usb-storage-tmpfiles.conf
 dependencies:
 - name: Restic
   purpose: Encrypted, compressed, deduplicated snapshot repository and restore operations.
@@ -210,7 +215,7 @@ references:
   megavault: /home/daniele/MegaVault/megavault.sqlite
   c2: Historical-only reference; no lifecycle writes or dispatch.
 freshness:
-  reviewed_commit: 273a7afcb559dbf4e0c3c512b2d5c83f2daf7172
+  reviewed_commit: 2e40cc507ad365d1e2948257a4d3d62718f68095
   watch_paths:
   - scripts
   - systemd
