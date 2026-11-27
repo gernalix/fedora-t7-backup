@@ -19,6 +19,9 @@ NOTIFIED=no
 log() { printf 'activity=%s job=%s phase=%s %s\n' "$ACTIVITY_ID" "$JOB_ID" "$PHASE" "$*"; }
 is_mounted() { mountpoint -q "$MOUNT"; }
 device_present() { [[ -e $DISK ]]; }
+# Identical rows can be reported more than once; conflicting rows remain
+# distinct and fail the existing strict source/UUID checks.
+unique_mount_field() { findmnt -rn -o "$1" --mountpoint "$MOUNT" | LC_ALL=C sort -u; }
 
 notify_error() {
     [[ $NOTIFIED == no ]] || return 0
@@ -90,10 +93,10 @@ systemctl start mnt-T7_BACKUP.mount
 mounted_uuid=
 for _ in {1..15}; do
     if is_mounted; then
-        mounted_source=$(findmnt -rn -o SOURCE --mountpoint "$MOUNT")
+        mounted_source=$(unique_mount_field SOURCE)
         mounted_real=$(readlink -e "$mounted_source" 2>/dev/null || true)
         expected_real=$(readlink -e "$PART" 2>/dev/null || true)
-        mounted_uuid=$(findmnt -rn -o UUID --mountpoint "$MOUNT")
+        mounted_uuid=$(unique_mount_field UUID)
         [[ -n $mounted_uuid ]] || mounted_uuid=$(blkid -s UUID -o value "$mounted_source" 2>/dev/null || true)
         [[ $mounted_uuid == "$UUID" && $mounted_real == "$expected_real" ]] && break
     fi

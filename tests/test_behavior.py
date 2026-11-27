@@ -12,6 +12,23 @@ NOTIFY = ROOT / "scripts" / "t7-restic-notify"
 UDEV_VERIFY = ROOT / "scripts" / "t7-udev-verify"
 
 
+class MountFieldTests(unittest.TestCase):
+    def test_duplicate_rows_are_collapsed_but_conflicts_remain(self):
+        script = (ROOT / "scripts" / "t7-restic-lifecycle").read_text()
+        helper = next(line for line in script.splitlines()
+                      if line.startswith("unique_mount_field()"))
+        for rows, expected in [("/dev/sda1\n/dev/sda1\n", "/dev/sda1"),
+                               ("/dev/sda1\n/dev/sdb1\n", "/dev/sda1\n/dev/sdb1"),
+                               ("uuid-a\nuuid-a\n", "uuid-a"),
+                               ("uuid-a\nuuid-b\n", "uuid-a\nuuid-b")]:
+            result = subprocess.run(
+                ["bash", "-c", 'set -eo pipefail; MOUNT=/fixture; '
+                 'findmnt() { printf "%s" "$ROWS"; }; ' + helper +
+                 '; unique_mount_field SOURCE'],
+                env={**os.environ, "ROWS": rows}, capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.strip(), expected)
+
+
 class NotifyBehaviorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
