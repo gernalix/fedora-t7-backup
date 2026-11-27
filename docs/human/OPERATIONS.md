@@ -38,6 +38,13 @@ Ogni collegamento crea un backup. `forget` applica 7 giornalieri, 5 settimanali,
 volta/settimana e check completo a una volta/mese. Dopo successo, il reminder
 one-shot a 30 minuti notifica solo se il seriale è ancora sul bus.
 
+Durante il backup systemd limita a 120 MB/s le letture del servizio sul disco
+fisico che contiene `/home`. Il limite riduce la contesa con le applicazioni
+locali e può allungare il backup. Le scritture sul T7, la selezione dei file e
+la retention seguono le impostazioni esistenti. Sul job attivo, verifica il
+limite in `io.max` sotto il `ControlGroup` del servizio e confronta la pressione
+I/O di Fedora durante il backup.
+
 Disabilitare temporaneamente il trigger: rinominare con prudenza la regola
 `/etc/udev/rules.d/90-t7-name.rules`, poi `sudo udevadm control --reload-rules`;
 ripristinarla e ricaricare per riattivare. Non modificare UUID/seriale.
